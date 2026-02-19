@@ -1,0 +1,13 @@
+﻿[project]
+name = "comfyui-lostless-nodes"
+description = "Pre-run random image selector and broadcast randomize button nodes for ComfyUI"
+version = "0.1.0"
+license = "MIT"
+
+[project.urls]
+Repository = "https://example.com/comfyui-lostless-nodes"
+
+[tool.comfy]
+PublisherId = "lostless"
+DisplayName = "ComfyUI Lostless Nodes"
+Icon = ""
