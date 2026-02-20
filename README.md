@@ -1,18 +1,27 @@
 ﻿# ComfyUI Lostless Nodes
 
-Nodes included:
+This repository contains Lostless custom nodes for ComfyUI, including random image utilities and an embedded advanced mask editor/video toolkit.
+
+## Included Nodes
 
 - `Lostless Random Image`
-  - Pick a random image from a folder via button press before queueing.
-  - Outputs `IMAGE` and selected file path (`STRING`).
+  - Pick an image from a folder using a UI randomize action.
+  - Outputs `IMAGE` and the selected filename (`STRING`).
 
 - `Lostless Randomize Button`
-  - Standalone button node.
-  - Connect its `trigger` output to one or more `Lostless Random Image` nodes.
-  - Button press randomizes all connected image nodes at once.
+  - Broadcast randomize trigger to connected `Lostless Random Image` nodes.
+
+- Embedded `Lostless Mask Editor Pipeline` node set
+  - Loaded from `Lostless-Mask-Editor-Pipeline`.
+  - Includes timeline, mask editor, and WAN video helper nodes exposed by the embedded package.
+
+## Usage
+
+1. Put this repo in `ComfyUI/custom_nodes/comfyui-lostless-nodes`.
+2. Restart ComfyUI.
+3. Add nodes from `lostless/nodes` and the embedded WanVace/Lostless categories.
 
 ## Notes
 
-- In each random image node, set `folder_path` and optional `allowed_extensions`.
-- Press `Randomize Image` on an individual node, or press `Randomize Connected` on the broadcaster node.
-- Queue the workflow after selection to load the chosen images.
+- The embedded package is versioned in this repo under `Lostless-Mask-Editor-Pipeline`.
+- Keep dependencies from that package installed if prompted by ComfyUI.

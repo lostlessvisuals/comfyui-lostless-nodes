@@ -16,9 +16,9 @@ from server import PromptServer
 DEFAULT_EXTENSIONS = ".png,.jpg,.jpeg,.webp,.bmp,.gif,.tif,.tiff"
 
 def _load_embedded_wanvace_mappings():
-    """Load node mappings from embedded ComfyUI_WanVace-pipeline-main package."""
+    """Load node mappings from embedded Lostless Mask Editor Pipeline package."""
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    package_dir = os.path.join(base_dir, "ComfyUI_WanVace-pipeline-main")
+    package_dir = os.path.join(base_dir, "Lostless-Mask-Editor-Pipeline")
     init_file = os.path.join(package_dir, "__init__.py")
     module_name = "lostless_embedded_wanvace_pipeline"
 
@@ -275,3 +275,4 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 _EMBEDDED_CLASS_MAPPINGS, _EMBEDDED_DISPLAY_MAPPINGS = _load_embedded_wanvace_mappings()
 NODE_CLASS_MAPPINGS.update(_EMBEDDED_CLASS_MAPPINGS)
 NODE_DISPLAY_NAME_MAPPINGS.update(_EMBEDDED_DISPLAY_MAPPINGS)
+
