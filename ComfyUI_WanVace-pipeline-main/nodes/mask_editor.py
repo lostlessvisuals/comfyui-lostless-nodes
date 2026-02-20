@@ -586,10 +586,11 @@ class InpaintingMaskEditor(QDialog):
         
         # Top toolbar (compact)
         top_toolbar = QWidget()
-        top_toolbar.setMaximumHeight(40)
+        top_toolbar.setMinimumHeight(60)
+        top_toolbar.setMaximumHeight(90)
         toolbar_layout = QHBoxLayout(top_toolbar)
         toolbar_layout.setContentsMargins(5, 2, 5, 2)
-        toolbar_layout.setSpacing(5)
+        toolbar_layout.setSpacing(6)
         
         # Create tool button style (dark theme)
         tool_button_style = """
@@ -813,7 +814,8 @@ class InpaintingMaskEditor(QDialog):
         saved_brush_size = self.brush_sizes['pixel']
         self.brush_size_slider.setValue(saved_brush_size)
         self.brush_size = saved_brush_size
-        self.brush_size_slider.setMaximumWidth(80)
+        self.brush_size_slider.setMinimumWidth(130)
+        self.brush_size_slider.setMaximumWidth(220)
         self.brush_size_slider.valueChanged.connect(self.on_brush_size_changed)
         self.brush_size_slider.setToolTip("Brush size (Alt+Right-click drag)")
         toolbar_layout.addWidget(self.brush_size_slider)
@@ -839,7 +841,8 @@ class InpaintingMaskEditor(QDialog):
         initial_vertex_count = 150
         self.vertex_count_slider.setValue(initial_vertex_count)
         self.settings.setValue('mask_editor_vertex_count', initial_vertex_count)
-        self.vertex_count_slider.setMaximumWidth(150)
+        self.vertex_count_slider.setMinimumWidth(180)
+        self.vertex_count_slider.setMaximumWidth(320)
         self.vertex_count_slider.valueChanged.connect(self.on_vertex_count_changed)
         self.vertex_count_slider.sliderPressed.connect(self.on_vertex_slider_pressed)
         self.vertex_count_slider.sliderReleased.connect(self.on_vertex_slider_released)
@@ -910,7 +913,7 @@ class InpaintingMaskEditor(QDialog):
                 background-color: #595959;
                 color: #ffffff;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: 11px;
                 border: 1px solid #777;
                 border-radius: 4px;
                 padding: 3px 8px;
@@ -924,7 +927,7 @@ class InpaintingMaskEditor(QDialog):
                 background-color: #4f6478;
                 color: #ffffff;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: 11px;
                 border: 1px solid #6f859a;
                 border-radius: 4px;
                 padding: 3px 8px;
@@ -938,7 +941,7 @@ class InpaintingMaskEditor(QDialog):
                 background-color: #6a4f4f;
                 color: #ffffff;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: 11px;
                 border: 1px solid #8c6666;
                 border-radius: 4px;
                 padding: 3px 8px;
@@ -961,18 +964,18 @@ class InpaintingMaskEditor(QDialog):
         toolbar_layout.addWidget(clear_section_label)
 
         # Clear current frame button
-        self.clear_btn = QPushButton("Clear Frame")
-        self.clear_btn.setMinimumWidth(96)
+        self.clear_btn = QPushButton("Mask")
+        self.clear_btn.setMinimumWidth(70)
         self.clear_btn.clicked.connect(self.clear_current_frame)
-        self.clear_btn.setToolTip("Clear masks on the current frame only")
+        self.clear_btn.setToolTip("Clear: current frame mask only")
         self.clear_btn.setStyleSheet(clear_button_style)
         toolbar_layout.addWidget(self.clear_btn)
         
         # Clear all frames button
-        self.clear_all_btn = QPushButton("Clear All Frames")
-        self.clear_all_btn.setMinimumWidth(126)
+        self.clear_all_btn = QPushButton("All Masks")
+        self.clear_all_btn.setMinimumWidth(90)
         self.clear_all_btn.clicked.connect(self.clear_all_frames)
-        self.clear_all_btn.setToolTip("Clear masks for every frame (confirmation required)")
+        self.clear_all_btn.setToolTip("Clear: all frame masks (confirmation required)")
         self.clear_all_btn.setStyleSheet(clear_button_style)
         toolbar_layout.addWidget(self.clear_all_btn)
 
@@ -986,16 +989,16 @@ class InpaintingMaskEditor(QDialog):
         toolbar_layout.addWidget(connect_section_label)
         
         # Connect floating masks button (shape/liquify modes)
-        self.connect_masks_btn = QPushButton("Connect Floating Masks")
-        self.connect_masks_btn.setMinimumWidth(160)
-        self.connect_masks_btn.setToolTip("Connect smaller floating masks to nearby larger masks on this frame")
+        self.connect_masks_btn = QPushButton("Mask")
+        self.connect_masks_btn.setMinimumWidth(70)
+        self.connect_masks_btn.setToolTip("Connect: floating masks on current frame")
         self.connect_masks_btn.clicked.connect(self.connect_floating_masks_current_frame)
         self.connect_masks_btn.setStyleSheet(connect_button_style)
         toolbar_layout.addWidget(self.connect_masks_btn)
 
-        self.connect_masks_all_btn = QPushButton("Connect Masks (All Frames)")
-        self.connect_masks_all_btn.setMinimumWidth(175)
-        self.connect_masks_all_btn.setToolTip("Connect floating masks on every frame that already has shape masks")
+        self.connect_masks_all_btn = QPushButton("All Masks")
+        self.connect_masks_all_btn.setMinimumWidth(90)
+        self.connect_masks_all_btn.setToolTip("Connect: floating masks on all keyframes")
         self.connect_masks_all_btn.clicked.connect(self.connect_floating_masks_all_frames)
         self.connect_masks_all_btn.setStyleSheet(connect_button_style)
         toolbar_layout.addWidget(self.connect_masks_all_btn)
@@ -1023,16 +1026,16 @@ class InpaintingMaskEditor(QDialog):
         cleanup_section_label.setStyleSheet(section_label_style)
         toolbar_layout.addWidget(cleanup_section_label)
 
-        self.keep_largest_mask_frame_btn = QPushButton("Keep Largest Mask (Current Frame)")
-        self.keep_largest_mask_frame_btn.setMinimumWidth(240)
-        self.keep_largest_mask_frame_btn.setToolTip("On current keyframe, keep only the largest mask by area and remove smaller masks")
+        self.keep_largest_mask_frame_btn = QPushButton("Keep Largest Mask")
+        self.keep_largest_mask_frame_btn.setMinimumWidth(145)
+        self.keep_largest_mask_frame_btn.setToolTip("Cleanup: keep only largest mask on current frame")
         self.keep_largest_mask_frame_btn.clicked.connect(self.keep_largest_mask_current_frame)
         self.keep_largest_mask_frame_btn.setStyleSheet(cleanup_button_style)
         toolbar_layout.addWidget(self.keep_largest_mask_frame_btn)
 
-        self.keep_largest_masks_btn = QPushButton("Keep Largest Mask (All Keyframes)")
-        self.keep_largest_masks_btn.setMinimumWidth(230)
-        self.keep_largest_masks_btn.setToolTip("For each shape keyframe, keep only the largest mask by area and remove smaller masks")
+        self.keep_largest_masks_btn = QPushButton("Keep All Largest Masks")
+        self.keep_largest_masks_btn.setMinimumWidth(170)
+        self.keep_largest_masks_btn.setToolTip("Cleanup: keep only largest mask on all keyframes")
         self.keep_largest_masks_btn.clicked.connect(self.keep_largest_mask_all_keyframes)
         self.keep_largest_masks_btn.setStyleSheet(cleanup_button_style)
         toolbar_layout.addWidget(self.keep_largest_masks_btn)
@@ -1140,6 +1143,19 @@ class InpaintingMaskEditor(QDialog):
         self.fullscreen_btn.setToolTip("Toggle full screen view (F11)")
         self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
         timeline_layout.addWidget(self.fullscreen_btn)
+
+        sep_playback_actions = QFrame()
+        sep_playback_actions.setFrameShape(QFrame.VLine)
+        sep_playback_actions.setFrameShadow(QFrame.Sunken)
+        timeline_layout.addWidget(sep_playback_actions)
+
+        self.save_btn = QPushButton("Save Masks")
+        self.save_btn.clicked.connect(self.save_masks)
+        timeline_layout.addWidget(self.save_btn)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.clicked.connect(self.cancel_without_prompts)
+        timeline_layout.addWidget(self.cancel_btn)
         
         # Separator
         sep_playback = QFrame()
@@ -1153,21 +1169,6 @@ class InpaintingMaskEditor(QDialog):
         
         timeline_container.addLayout(timeline_layout)
         main_layout.addLayout(timeline_container)
-        
-        # Dialog buttons
-        button_layout = QHBoxLayout()
-        
-        button_layout.addStretch()
-        
-        self.save_btn = QPushButton("Save Masks")
-        self.save_btn.clicked.connect(self.save_masks)
-        button_layout.addWidget(self.save_btn)
-        
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.clicked.connect(self.cancel_without_prompts)
-        button_layout.addWidget(self.cancel_btn)
-        
-        main_layout.addLayout(button_layout)
         
         # Initialize display
         self.update_display()
