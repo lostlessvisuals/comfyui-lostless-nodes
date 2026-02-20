@@ -574,6 +574,8 @@ class InpaintingMaskEditor(QDialog):
         x = (screen.width() - width) // 2
         y = (screen.height() - height) // 2
         self.setGeometry(x, y, width, height)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint | Qt.WindowSystemMenuHint)
+        self.setSizeGripEnabled(True)
         
         # Enable keyboard shortcuts
         self.setFocusPolicy(Qt.StrongFocus)
@@ -1133,6 +1135,11 @@ class InpaintingMaskEditor(QDialog):
         self.loop_check.setChecked(True)
         self.loop_check.setToolTip("Loop playback when reaching end")
         timeline_layout.addWidget(self.loop_check)
+
+        self.fullscreen_btn = QPushButton("Full Screen")
+        self.fullscreen_btn.setToolTip("Toggle full screen view (F11)")
+        self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
+        timeline_layout.addWidget(self.fullscreen_btn)
         
         # Separator
         sep_playback = QFrame()
@@ -2817,6 +2824,14 @@ class InpaintingMaskEditor(QDialog):
     
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts"""
+        if event.key() == Qt.Key_F11 and not event.isAutoRepeat():
+            self.toggle_fullscreen()
+            event.accept()
+            return
+        if event.key() == Qt.Key_Escape and self.isFullScreen() and not event.isAutoRepeat():
+            self.toggle_fullscreen()
+            event.accept()
+            return
         if event.key() == Qt.Key_Left:
             if event.modifiers() & Qt.AltModifier:
                 # Alt+Left - Jump to previous keyframe/mask based on current mode
@@ -2886,6 +2901,21 @@ class InpaintingMaskEditor(QDialog):
     def keyReleaseEvent(self, event):
         """Handle key release events - pass to mask widget for temporary tool handling"""
         self.mask_widget.keyReleaseEvent(event)
+
+    def toggle_fullscreen(self):
+        """Toggle full screen mode while preserving prior window geometry."""
+        if self.isFullScreen():
+            self.showNormal()
+            if hasattr(self, "_windowed_geometry") and self._windowed_geometry:
+                self.setGeometry(self._windowed_geometry)
+            if hasattr(self, "fullscreen_btn"):
+                self.fullscreen_btn.setText("Full Screen")
+        else:
+            self._windowed_geometry = self.geometry()
+            self.showFullScreen()
+            if hasattr(self, "fullscreen_btn"):
+                self.fullscreen_btn.setText("Windowed")
+        self.mask_widget.setFocus()
     
     def closeEvent(self, event):
         """Handle window close event - prompt to save if there are unsaved changes"""
@@ -6723,12 +6753,15 @@ class MaskDrawingWidget(QWidget):
             shortcuts.append(("Shift+Click", "Merge shape (interp)"))
             shortcuts.append(("D", "Toggle debug view"))
 
-        padding = 12
-        header_height = 24
-        row_height = 20
-        column_gap = 14
+        scale = min(1.0, self.width() / 1500.0, self.height() / 900.0)
+        scale = max(0.72, scale)
 
-        overlay_width = min(460, max(340, int(self.width() * 0.38)))
+        padding = max(8, int(12 * scale))
+        header_height = max(18, int(24 * scale))
+        row_height = max(15, int(20 * scale))
+        column_gap = max(8, int(14 * scale))
+
+        overlay_width = min(int(460 * scale + 40), max(int(300 * scale), int(self.width() * 0.38)))
         x = max(10, self.width() - overlay_width - 12)
         y = 12
         available_height = max(120, self.height() - 24)
@@ -6751,10 +6784,10 @@ class MaskDrawingWidget(QWidget):
         painter.fillRect(x, y, overlay_width, overlay_height, QColor(0, 0, 0, 185))
 
         painter.setPen(QPen(Qt.white, 1))
-        painter.setFont(QFont("Arial", 10, QFont.Bold))
+        painter.setFont(QFont("Arial", max(8, int(10 * scale)), QFont.Bold))
         painter.drawText(x + padding, y + padding + 16, "Keyboard Shortcuts")
 
-        painter.setFont(QFont("Arial", 9))
+        painter.setFont(QFont("Arial", max(7, int(9 * scale))))
         metrics = painter.fontMetrics()
         row_start_y = y + padding + header_height
 
