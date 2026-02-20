@@ -1,5 +1,7 @@
 ﻿import os
 import random
+import sys
+import importlib.util
 from io import BytesIO
 from mimetypes import guess_type
 from typing import List, Set
@@ -13,6 +15,38 @@ from server import PromptServer
 
 DEFAULT_EXTENSIONS = ".png,.jpg,.jpeg,.webp,.bmp,.gif,.tif,.tiff"
 
+def _load_embedded_wanvace_mappings():
+    """Load node mappings from embedded ComfyUI_WanVace-pipeline-main package."""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    package_dir = os.path.join(base_dir, "ComfyUI_WanVace-pipeline-main")
+    init_file = os.path.join(package_dir, "__init__.py")
+    module_name = "lostless_embedded_wanvace_pipeline"
+
+    if not os.path.isfile(init_file):
+        return {}, {}
+
+    try:
+        if module_name in sys.modules:
+            module = sys.modules[module_name]
+        else:
+            spec = importlib.util.spec_from_file_location(
+                module_name,
+                init_file,
+                submodule_search_locations=[package_dir],
+            )
+            if spec is None or spec.loader is None:
+                raise RuntimeError(f"Unable to create import spec for {init_file}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+
+        class_mappings = getattr(module, "NODE_CLASS_MAPPINGS", {}) or {}
+        display_mappings = getattr(module, "NODE_DISPLAY_NAME_MAPPINGS", {}) or {}
+        print(f"[Lostless Nodes] Loaded embedded WanVace mappings: {len(class_mappings)} nodes")
+        return class_mappings, display_mappings
+    except Exception as e:
+        print(f"[Lostless Nodes] Failed to load embedded WanVace package: {e}")
+        return {}, {}
 
 def _normalize_extensions(raw_extensions: str) -> Set[str]:
     values = [x.strip().lower() for x in raw_extensions.split(",") if x.strip()]
@@ -237,3 +271,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LostlessRandomImage": "Lostless Random Image",
     "LostlessRandomizeButton": "Lostless Randomize Button",
 }
+
+_EMBEDDED_CLASS_MAPPINGS, _EMBEDDED_DISPLAY_MAPPINGS = _load_embedded_wanvace_mappings()
+NODE_CLASS_MAPPINGS.update(_EMBEDDED_CLASS_MAPPINGS)
+NODE_DISPLAY_NAME_MAPPINGS.update(_EMBEDDED_DISPLAY_MAPPINGS)
