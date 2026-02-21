@@ -1,4 +1,4 @@
-"""
+﻿"""
 ComfyUI WAN Vace Pipeline
 Video frame processing nodes for AI interpolation workflows
 """
@@ -261,6 +261,49 @@ class MaskEditor:
         edited_masks_tensor = torch.from_numpy(edited_masks.astype(np.float32) / 255.0)
         edited_mask_image_tensor = self._mask_to_bw_image(edited_masks_tensor)
         return (edited_masks_tensor, edited_mask_image_tensor)
+class WANVaceImageToMask:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "threshold": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "invert": ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    RETURN_TYPES = ("MASK", "IMAGE")
+    RETURN_NAMES = ("masks", "mask_image")
+    FUNCTION = "convert"
+    CATEGORY = "WAN/mask"
+
+    def convert(self, images, threshold=0.5, invert=False):
+        import torch
+
+        if images is None:
+            raise ValueError("WANVaceImageToMask requires an IMAGE input.")
+
+        if images.ndim == 3:
+            images = images.unsqueeze(0)
+        if images.ndim != 4:
+            raise ValueError(f"Expected IMAGE batch [B,H,W,C], got {tuple(images.shape)}")
+
+        images = torch.nan_to_num(images.float(), nan=0.0, posinf=1.0, neginf=0.0)
+        images = torch.clamp(images, 0.0, 1.0)
+
+        if int(images.shape[-1]) == 1:
+            gray = images[..., 0]
+        else:
+            # ITU-R BT.709 luminance from RGB IMAGE input.
+            gray = (0.2126 * images[..., 0]) + (0.7152 * images[..., 1]) + (0.0722 * images[..., 2])
+
+        masks = (gray >= float(threshold)).to(torch.float32)
+        if invert:
+            masks = 1.0 - masks
+
+        mask_image = masks.unsqueeze(-1).expand(-1, -1, -1, 3).contiguous()
+        return (masks.contiguous(), mask_image)
+
 # Define outpainting editor node
 class WANVaceOutpaintingEditor:
     @classmethod
@@ -708,8 +751,11 @@ NODE_DISPLAY_NAME_MAPPINGS = {}
 NODE_CLASS_MAPPINGS["MaskEditor"] = MaskEditor
 NODE_DISPLAY_NAME_MAPPINGS["MaskEditor"] = "Mask Editor"
 
+NODE_CLASS_MAPPINGS["WANVaceImageToMask"] = WANVaceImageToMask
+NODE_DISPLAY_NAME_MAPPINGS["WANVaceImageToMask"] = "WanVace-pipeline Image To Mask"
+
 NODE_CLASS_MAPPINGS["WANVaceOutpaintingEditor"] = WANVaceOutpaintingEditor
-NODE_DISPLAY_NAME_MAPPINGS["WANVaceOutpaintingEditor"] = "WanVace-pipeline Outpainting Editor 🎨"
+NODE_DISPLAY_NAME_MAPPINGS["WANVaceOutpaintingEditor"] = "WanVace-pipeline Outpainting Editor ðŸŽ¨"
 
 # Try to load crop and stitch nodes first (these should work independently)
 print("[WAN Vace Pipeline] Loading crop and stitch nodes...")
@@ -720,12 +766,12 @@ try:
     NODE_CLASS_MAPPINGS["WanCropImproved"] = WanCropImproved
     NODE_CLASS_MAPPINGS["WanStitchImproved"] = WanStitchImproved
     
-    NODE_DISPLAY_NAME_MAPPINGS["WanCropImproved"] = "WanVace-pipeline Crop ✂️"
-    NODE_DISPLAY_NAME_MAPPINGS["WanStitchImproved"] = "WanVace-pipeline Stitch ✂️"
+    NODE_DISPLAY_NAME_MAPPINGS["WanCropImproved"] = "WanVace-pipeline Crop âœ‚ï¸"
+    NODE_DISPLAY_NAME_MAPPINGS["WanStitchImproved"] = "WanVace-pipeline Stitch âœ‚ï¸"
     
-    print("[WAN Vace Pipeline] ✅ Successfully loaded crop and stitch nodes")
+    print("[WAN Vace Pipeline] âœ… Successfully loaded crop and stitch nodes")
 except Exception as crop_e:
-    print(f"[WAN Vace Pipeline] ❌ ERROR loading crop and stitch nodes: {crop_e}")
+    print(f"[WAN Vace Pipeline] âŒ ERROR loading crop and stitch nodes: {crop_e}")
     import traceback
     traceback.print_exc()
 
@@ -753,6 +799,8 @@ import os
 WEB_DIRECTORY = os.path.join(os.path.dirname(__file__), "web")
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
+
+
 
 
 

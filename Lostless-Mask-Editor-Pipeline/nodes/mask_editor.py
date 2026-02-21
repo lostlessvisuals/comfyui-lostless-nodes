@@ -565,7 +565,7 @@ class InpaintingMaskEditor(QDialog):
             self.auto_save_timer.start(self.auto_save_interval)
         
     def init_ui(self):
-        self.setWindowTitle(f"Mask Editor ({MASK_EDITOR_BUILD_TAG}) - Arrow keys: navigate | B: brush | Z: zoom | X: toggle paint/erase | Space+drag: pan")
+        self.setWindowTitle(f"Mask Editor ({MASK_EDITOR_BUILD_TAG}) - Arrow keys: navigate, B: brush, Z: zoom, X: toggle paint/erase, Space+drag: pan")
         
         # Get screen geometry and center window at 70% of screen size
         screen = QApplication.primaryScreen().geometry()
@@ -586,11 +586,11 @@ class InpaintingMaskEditor(QDialog):
         
         # Top toolbar (compact)
         top_toolbar = QWidget()
-        top_toolbar.setMinimumHeight(60)
-        top_toolbar.setMaximumHeight(90)
+        top_toolbar.setMinimumHeight(66)
+        top_toolbar.setMaximumHeight(110)
         toolbar_layout = QHBoxLayout(top_toolbar)
         toolbar_layout.setContentsMargins(5, 2, 5, 2)
-        toolbar_layout.setSpacing(6)
+        toolbar_layout.setSpacing(4)
         
         # Create tool button style (dark theme)
         tool_button_style = """
@@ -624,7 +624,7 @@ class InpaintingMaskEditor(QDialog):
                 color: white;
                 padding: 2px 6px;
                 border-radius: 3px;
-                font-size: 11px;
+                font-size: 12px;
                 font-weight: bold;
             }
         """
@@ -814,8 +814,8 @@ class InpaintingMaskEditor(QDialog):
         saved_brush_size = self.brush_sizes['pixel']
         self.brush_size_slider.setValue(saved_brush_size)
         self.brush_size = saved_brush_size
-        self.brush_size_slider.setMinimumWidth(130)
-        self.brush_size_slider.setMaximumWidth(220)
+        self.brush_size_slider.setMinimumWidth(85)
+        self.brush_size_slider.setMaximumWidth(130)
         self.brush_size_slider.valueChanged.connect(self.on_brush_size_changed)
         self.brush_size_slider.setToolTip("Brush size (Alt+Right-click drag)")
         toolbar_layout.addWidget(self.brush_size_slider)
@@ -826,9 +826,7 @@ class InpaintingMaskEditor(QDialog):
         
         # Separator
         sep1 = QFrame()
-        sep1.setFrameShape(QFrame.VLine)
-        sep1.setFrameShadow(QFrame.Sunken)
-        toolbar_layout.addWidget(sep1)
+        sep1.setVisible(False)
         
         # Vertex count controls for shape mode
         self.vertex_count_label_text = QLabel("Vertices:")
@@ -841,8 +839,8 @@ class InpaintingMaskEditor(QDialog):
         initial_vertex_count = 150
         self.vertex_count_slider.setValue(initial_vertex_count)
         self.settings.setValue('mask_editor_vertex_count', initial_vertex_count)
-        self.vertex_count_slider.setMinimumWidth(180)
-        self.vertex_count_slider.setMaximumWidth(320)
+        self.vertex_count_slider.setMinimumWidth(100)
+        self.vertex_count_slider.setMaximumWidth(150)
         self.vertex_count_slider.valueChanged.connect(self.on_vertex_count_changed)
         self.vertex_count_slider.sliderPressed.connect(self.on_vertex_slider_pressed)
         self.vertex_count_slider.sliderReleased.connect(self.on_vertex_slider_released)
@@ -904,16 +902,14 @@ class InpaintingMaskEditor(QDialog):
         
         # Separator
         sep2 = QFrame()
-        sep2.setFrameShape(QFrame.VLine)
-        sep2.setFrameShadow(QFrame.Sunken)
-        toolbar_layout.addWidget(sep2)
+        sep2.setVisible(False)
         
         clear_button_style = """
             QPushButton {
                 background-color: #595959;
                 color: #ffffff;
                 font-weight: 600;
-                font-size: 11px;
+                font-size: 12px;
                 border: 1px solid #777;
                 border-radius: 4px;
                 padding: 3px 8px;
@@ -927,7 +923,7 @@ class InpaintingMaskEditor(QDialog):
                 background-color: #4f6478;
                 color: #ffffff;
                 font-weight: 600;
-                font-size: 11px;
+                font-size: 12px;
                 border: 1px solid #6f859a;
                 border-radius: 4px;
                 padding: 3px 8px;
@@ -941,7 +937,7 @@ class InpaintingMaskEditor(QDialog):
                 background-color: #6a4f4f;
                 color: #ffffff;
                 font-weight: 600;
-                font-size: 11px;
+                font-size: 12px;
                 border: 1px solid #8c6666;
                 border-radius: 4px;
                 padding: 3px 8px;
@@ -953,7 +949,7 @@ class InpaintingMaskEditor(QDialog):
         section_label_style = """
             QLabel {
                 color: #cfcfcf;
-                font-size: 11px;
+                font-size: 12px;
                 font-weight: 600;
                 padding: 0 2px;
             }
@@ -965,7 +961,7 @@ class InpaintingMaskEditor(QDialog):
 
         # Clear current frame button
         self.clear_btn = QPushButton("Mask")
-        self.clear_btn.setMinimumWidth(70)
+        self.clear_btn.setMinimumWidth(58)
         self.clear_btn.clicked.connect(self.clear_current_frame)
         self.clear_btn.setToolTip("Clear: current frame mask only")
         self.clear_btn.setStyleSheet(clear_button_style)
@@ -973,7 +969,7 @@ class InpaintingMaskEditor(QDialog):
         
         # Clear all frames button
         self.clear_all_btn = QPushButton("All Masks")
-        self.clear_all_btn.setMinimumWidth(90)
+        self.clear_all_btn.setMinimumWidth(74)
         self.clear_all_btn.clicked.connect(self.clear_all_frames)
         self.clear_all_btn.setToolTip("Clear: all frame masks (confirmation required)")
         self.clear_all_btn.setStyleSheet(clear_button_style)
@@ -981,23 +977,21 @@ class InpaintingMaskEditor(QDialog):
 
         # Visual separation between clear and connect groups
         sep_connect_group = QFrame()
-        sep_connect_group.setFrameShape(QFrame.VLine)
-        sep_connect_group.setFrameShadow(QFrame.Sunken)
-        toolbar_layout.addWidget(sep_connect_group)
+        sep_connect_group.setVisible(False)
         connect_section_label = QLabel("Connect")
         connect_section_label.setStyleSheet(section_label_style)
         toolbar_layout.addWidget(connect_section_label)
         
         # Connect floating masks button (shape/liquify modes)
         self.connect_masks_btn = QPushButton("Mask")
-        self.connect_masks_btn.setMinimumWidth(70)
+        self.connect_masks_btn.setMinimumWidth(58)
         self.connect_masks_btn.setToolTip("Connect: floating masks on current frame")
         self.connect_masks_btn.clicked.connect(self.connect_floating_masks_current_frame)
         self.connect_masks_btn.setStyleSheet(connect_button_style)
         toolbar_layout.addWidget(self.connect_masks_btn)
 
         self.connect_masks_all_btn = QPushButton("All Masks")
-        self.connect_masks_all_btn.setMinimumWidth(90)
+        self.connect_masks_all_btn.setMinimumWidth(74)
         self.connect_masks_all_btn.setToolTip("Connect: floating masks on all keyframes")
         self.connect_masks_all_btn.clicked.connect(self.connect_floating_masks_all_frames)
         self.connect_masks_all_btn.setStyleSheet(connect_button_style)
@@ -1010,7 +1004,7 @@ class InpaintingMaskEditor(QDialog):
         self.connect_distance_spinner = QSpinBox()
         self.connect_distance_spinner.setRange(1, 100)
         self.connect_distance_spinner.setSingleStep(1)
-        self.connect_distance_spinner.setMaximumWidth(70)
+        self.connect_distance_spinner.setMaximumWidth(56)
         saved_connect_distance = self.settings.value('connect_mask_distance_percent', 20, type=int)
         self.connect_distance_spinner.setValue(saved_connect_distance)
         self.connect_distance_spinner.valueChanged.connect(
@@ -1019,22 +1013,20 @@ class InpaintingMaskEditor(QDialog):
         toolbar_layout.addWidget(self.connect_distance_spinner)
 
         sep_cleanup_group = QFrame()
-        sep_cleanup_group.setFrameShape(QFrame.VLine)
-        sep_cleanup_group.setFrameShadow(QFrame.Sunken)
-        toolbar_layout.addWidget(sep_cleanup_group)
+        sep_cleanup_group.setVisible(False)
         cleanup_section_label = QLabel("Cleanup")
         cleanup_section_label.setStyleSheet(section_label_style)
         toolbar_layout.addWidget(cleanup_section_label)
 
         self.keep_largest_mask_frame_btn = QPushButton("Keep Largest Mask")
-        self.keep_largest_mask_frame_btn.setMinimumWidth(145)
+        self.keep_largest_mask_frame_btn.setMinimumWidth(118)
         self.keep_largest_mask_frame_btn.setToolTip("Cleanup: keep only largest mask on current frame")
         self.keep_largest_mask_frame_btn.clicked.connect(self.keep_largest_mask_current_frame)
         self.keep_largest_mask_frame_btn.setStyleSheet(cleanup_button_style)
         toolbar_layout.addWidget(self.keep_largest_mask_frame_btn)
 
         self.keep_largest_masks_btn = QPushButton("Keep All Largest Masks")
-        self.keep_largest_masks_btn.setMinimumWidth(170)
+        self.keep_largest_masks_btn.setMinimumWidth(138)
         self.keep_largest_masks_btn.setToolTip("Cleanup: keep only largest mask on all keyframes")
         self.keep_largest_masks_btn.clicked.connect(self.keep_largest_mask_all_keyframes)
         self.keep_largest_masks_btn.setStyleSheet(cleanup_button_style)
@@ -1337,7 +1329,7 @@ class InpaintingMaskEditor(QDialog):
                     color: white;
                     padding: 2px 6px;
                     border-radius: 3px;
-                    font-size: 11px;
+                    font-size: 12px;
                     font-weight: bold;
                 }
             """)
@@ -1349,7 +1341,7 @@ class InpaintingMaskEditor(QDialog):
                     color: white;
                     padding: 2px 6px;
                     border-radius: 3px;
-                    font-size: 11px;
+                    font-size: 12px;
                     font-weight: bold;
                 }
             """)
@@ -1361,7 +1353,7 @@ class InpaintingMaskEditor(QDialog):
                     color: white;
                     padding: 2px 6px;
                     border-radius: 3px;
-                    font-size: 11px;
+                    font-size: 12px;
                     font-weight: bold;
                 }
             """)
@@ -1373,7 +1365,7 @@ class InpaintingMaskEditor(QDialog):
                     color: white;
                     padding: 2px 6px;
                     border-radius: 3px;
-                    font-size: 11px;
+                    font-size: 12px;
                     font-weight: bold;
                 }
             """)
@@ -7687,3 +7679,6 @@ class MaskDrawingWidget(QWidget):
         
         # Update the display
         self.update()
+
+
+
