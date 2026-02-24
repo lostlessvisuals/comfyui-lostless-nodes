@@ -1,17 +1,17 @@
 ﻿# Lostless Mask Editor Pipeline
 
-This folder contains the embedded WAN Vace pipeline + mask editor package used by `comfyui-lostless-nodes`.
+This folder contains the embedded Lostless mask editor package used by `comfyui-lostless-nodes`.
 
 ## What This Includes
 
 - Timeline and keyframe tools
 - Mask editor workflow nodes
-- Video/frame utility nodes from the WAN Vace pipeline
+- Video/frame utility nodes from the Lostless mask editor package
 
 ## Repository Integration
 
 - Parent repo: `comfyui-lostless-nodes`
-- Embedded folder: `Lostless-Mask-Editor-Pipeline`
+- Embedded folder: `Lostless-Mask-Editor`
 - Loader entrypoint: `nodes.py`
 
 ## Install
@@ -22,4 +22,5 @@ This folder contains the embedded WAN Vace pipeline + mask editor package used b
 
 ## Credits
 
-This embedded package is based on the WAN Vace pipeline work and related upstream components listed in this repo.
+This embedded package is based on the Lostless mask editor package work and related upstream components listed in this repo.
+

@@ -1,5 +1,5 @@
 ﻿"""
-ComfyUI WAN Vace Pipeline
+ComfyUI Lostless Mask Editor
 Video frame processing nodes for AI interpolation workflows
 """
 
@@ -8,25 +8,25 @@ import sys
 
 # Print debug info about which file is being loaded
 current_file = os.path.abspath(__file__)
-print(f"[WAN Vace Pipeline] Loading from: {current_file}")
-print(f"[WAN Vace Pipeline] Python version: {sys.version}")
-print(f"[WAN Vace Pipeline] Module name: {__name__}")
-print(f"[WAN Vace Pipeline] Package path: {os.path.dirname(current_file)}")
+print(f"[Lostless Mask Editor] Loading from: {current_file}")
+print(f"[Lostless Mask Editor] Python version: {sys.version}")
+print(f"[Lostless Mask Editor] Module name: {__name__}")
+print(f"[Lostless Mask Editor] Package path: {os.path.dirname(current_file)}")
 
-print("[WAN Vace Pipeline] Loading custom nodes...")
+print("[Lostless Mask Editor] Loading custom nodes...")
 
 # Import server endpoints
 try:
     from . import mask_editor_server
-    print("[WAN Vace Pipeline] Mask editor server endpoints loaded")
+    print("[Lostless Mask Editor] Mask editor server endpoints loaded")
 except Exception as e:
-    print(f"[WAN Vace Pipeline] Failed to load mask editor server: {e}")
+    print(f"[Lostless Mask Editor] Failed to load mask editor server: {e}")
 
 try:
     from . import outpainting_editor_server
-    print("[WAN Vace Pipeline] Outpainting editor server endpoints loaded")
+    print("[Lostless Mask Editor] Outpainting editor server endpoints loaded")
 except Exception as e:
-    print(f"[WAN Vace Pipeline] Failed to load outpainting editor server: {e}")
+    print(f"[Lostless Mask Editor] Failed to load outpainting editor server: {e}")
 
 # Define mask editor node directly here to ensure it loads
 # TRULY PERSISTENT GLOBAL CACHE that survives module reloads
@@ -49,11 +49,36 @@ class MaskEditor:
                 "images": ("IMAGE",),
                 "masks": ("MASK",),
                 "edit_mode": ("BOOLEAN", {"default": True}),
+                "project_source": (
+                    ["Auto", "Mask Input", "Project (Port/File)"],
+                    {"default": "Auto"},
+                ),
+                "project_file_action": (
+                    ["None", "Load", "Save", "Load+Save"],
+                    {"default": "None"},
+                ),
+                "project_file_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": False,
+                        "placeholder": "Optional .json/.wmp path for project load/save",
+                    },
+                ),
+            },
+            "optional": {
+                "project_data_in": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": True,
+                    },
+                ),
             }
         }
 
-    RETURN_TYPES = ("MASK", "IMAGE")
-    RETURN_NAMES = ("masks", "mask_image")
+    RETURN_TYPES = ("MASK", "IMAGE", "STRING")
+    RETURN_NAMES = ("masks", "mask_image", "project_data")
     FUNCTION = "edit_mask"
     CATEGORY = "Mask Editor"
 
@@ -114,7 +139,35 @@ class MaskEditor:
         masks = (masks >= 0.5).to(torch.float32)
         return masks.unsqueeze(-1).expand(-1, -1, -1, 3).contiguous()
 
-    def edit_mask(self, images, masks, edit_mode=True):
+    def _load_project_text_from_file(self, project_file_path):
+        path = str(project_file_path or "").strip()
+        if not path:
+            return ""
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Project file not found: {path}")
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    def _parse_project_data_text(self, project_data_text):
+        import json
+
+        if not project_data_text:
+            return None
+        parsed = json.loads(project_data_text)
+        if not isinstance(parsed, dict):
+            raise ValueError("Project data must decode to a JSON object.")
+        return parsed
+
+    def edit_mask(
+        self,
+        images,
+        masks,
+        edit_mode=True,
+        project_source="Auto",
+        project_file_action="None",
+        project_file_path="",
+        project_data_in="",
+    ):
         import base64
         import cv2
         import json
@@ -125,8 +178,31 @@ class MaskEditor:
 
         images, masks = self._normalize_inputs(images, masks)
 
+        project_file_action = str(project_file_action or "None")
+        project_source = str(project_source or "Auto")
+        project_file_path = str(project_file_path or "")
+        project_data_in = str(project_data_in or "")
+
+        loaded_project_text = ""
+        if project_file_action in {"Load", "Load+Save"} and project_file_path.strip():
+            loaded_project_text = self._load_project_text_from_file(project_file_path)
+
+        incoming_project_text = loaded_project_text or project_data_in
+        use_project = False
+        if project_source == "Project (Port/File)":
+            use_project = bool(incoming_project_text)
+            if not use_project:
+                raise ValueError(
+                    "Project source is set to Project (Port/File), but no project data was provided "
+                    "via project_data_in or project_file_path/load."
+                )
+        elif project_source == "Auto":
+            use_project = bool(incoming_project_text)
+        elif project_source == "Mask Input":
+            use_project = False
+
         if not edit_mode:
-            return (masks, self._mask_to_bw_image(masks))
+            return (masks, self._mask_to_bw_image(masks), incoming_project_text if use_project else "")
 
         frame_count = int(images.shape[0])
         height = int(images.shape[1])
@@ -191,30 +267,62 @@ class MaskEditor:
             if frame_shapes:
                 shape_keyframes_payload[str(i)] = frame_shapes
 
-        project_data = {
-            "shape_keyframes": shape_keyframes_payload,
-            "mask_frames": mask_frames_payload,
-            "settings": {
-                "drawing_mode": "shape",
-                "brush_size": 30,
-                "vertex_count": 32,
-            },
-            "video_info": {
-                "path": input_frames_dir,
-                "type": "image_sequence",
-                "total_frames": frame_count,
-                "width": width,
-                "height": height,
-            },
-            "source_video": {
-                "path": input_frames_dir,
-                "type": "image_sequence",
-            },
-            "frame_files": frame_files,
-            "current_frame": 0,
-        }
+        project_data = None
+        if use_project:
+            project_data = self._parse_project_data_text(incoming_project_text)
+            if project_data is None:
+                raise ValueError("Failed to load project data.")
 
-        print(f"[MaskEditor] Launching editor with frames={frame_count}, image_size={(height, width)}, masks_shape={tuple(masks.shape)}, vector_keyframes={len(shape_keyframes_payload)}")
+            project_data.setdefault("shape_keyframes", {})
+            project_data.setdefault("mask_frames", {})
+            project_data.setdefault("settings", {})
+            project_data.setdefault("current_frame", 0)
+
+            if not project_data["shape_keyframes"] and not project_data["mask_frames"]:
+                # Fallback if imported project is effectively empty.
+                project_data["shape_keyframes"] = shape_keyframes_payload
+                project_data["mask_frames"] = mask_frames_payload
+
+            project_data["settings"].setdefault("drawing_mode", "shape")
+            project_data["settings"].setdefault("brush_size", 30)
+            project_data["settings"].setdefault("vertex_count", 32)
+        else:
+            project_data = {
+                "shape_keyframes": shape_keyframes_payload,
+                "mask_frames": mask_frames_payload,
+                "settings": {
+                    "drawing_mode": "shape",
+                    "brush_size": 30,
+                    "vertex_count": 32,
+                },
+                "current_frame": 0,
+            }
+
+        # Always bind the project to the current input image batch so old source paths
+        # do not override the node's current frame sequence.
+        project_data["video_info"] = {
+            "path": input_frames_dir,
+            "type": "image_sequence",
+            "total_frames": frame_count,
+            "width": width,
+            "height": height,
+        }
+        project_data["source_video"] = {
+            "path": input_frames_dir,
+            "type": "image_sequence",
+        }
+        project_data["frame_files"] = frame_files
+        try:
+            project_data["current_frame"] = max(0, min(int(project_data.get("current_frame", 0)), frame_count - 1))
+        except Exception:
+            project_data["current_frame"] = 0
+
+        source_msg = "project" if use_project else "mask_input"
+        print(
+            f"[MaskEditor] Launching editor source={source_msg}, frames={frame_count}, "
+            f"image_size={(height, width)}, masks_shape={tuple(masks.shape)}, "
+            f"vector_keyframes={len(project_data.get('shape_keyframes', {}))}"
+        )
 
         config = {
             "input_frames": [],
@@ -260,7 +368,20 @@ class MaskEditor:
 
         edited_masks_tensor = torch.from_numpy(edited_masks.astype(np.float32) / 255.0)
         edited_mask_image_tensor = self._mask_to_bw_image(edited_masks_tensor)
-        return (edited_masks_tensor, edited_mask_image_tensor)
+
+        project_data_out = ""
+        project_data_json_path = os.path.join(output_dir, "project_data.json")
+        if os.path.exists(project_data_json_path):
+            with open(project_data_json_path, "r", encoding="utf-8") as f:
+                project_data_out = f.read()
+
+        if project_file_action in {"Save", "Load+Save"} and project_file_path.strip() and project_data_out:
+            os.makedirs(os.path.dirname(os.path.abspath(project_file_path)), exist_ok=True)
+            with open(project_file_path, "w", encoding="utf-8") as f:
+                f.write(project_data_out)
+            print(f"[MaskEditor] Saved project data to: {project_file_path}")
+
+        return (edited_masks_tensor, edited_mask_image_tensor, project_data_out)
 class WANVaceImageToMask:
     @classmethod
     def INPUT_TYPES(cls):
@@ -275,7 +396,7 @@ class WANVaceImageToMask:
     RETURN_TYPES = ("MASK", "IMAGE")
     RETURN_NAMES = ("masks", "mask_image")
     FUNCTION = "convert"
-    CATEGORY = "WAN/mask"
+    CATEGORY = "lostless/mask"
 
     def convert(self, images, threshold=0.5, invert=False):
         import torch
@@ -322,7 +443,7 @@ class WANVaceOutpaintingEditor:
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     RETURN_NAMES = ("images", "masks", "status")
     FUNCTION = "process_outpainting"
-    CATEGORY = "WAN/mask"
+    CATEGORY = "lostless/mask"
     OUTPUT_NODE = True
     
     @classmethod
@@ -752,13 +873,13 @@ NODE_CLASS_MAPPINGS["MaskEditor"] = MaskEditor
 NODE_DISPLAY_NAME_MAPPINGS["MaskEditor"] = "Mask Editor"
 
 NODE_CLASS_MAPPINGS["WANVaceImageToMask"] = WANVaceImageToMask
-NODE_DISPLAY_NAME_MAPPINGS["WANVaceImageToMask"] = "WanVace-pipeline Image To Mask"
+NODE_DISPLAY_NAME_MAPPINGS["WANVaceImageToMask"] = "Lostless Image To Mask"
 
 NODE_CLASS_MAPPINGS["WANVaceOutpaintingEditor"] = WANVaceOutpaintingEditor
-NODE_DISPLAY_NAME_MAPPINGS["WANVaceOutpaintingEditor"] = "WanVace-pipeline Outpainting Editor ðŸŽ¨"
+NODE_DISPLAY_NAME_MAPPINGS["WANVaceOutpaintingEditor"] = "Lostless Outpainting Editor ðŸŽ¨"
 
 # Try to load crop and stitch nodes first (these should work independently)
-print("[WAN Vace Pipeline] Loading crop and stitch nodes...")
+print("[Lostless Mask Editor] Loading crop and stitch nodes...")
 try:
     from .wan_cropandstitch import WanCropImproved
     from .wan_cropandstitch import WanStitchImproved
@@ -766,39 +887,40 @@ try:
     NODE_CLASS_MAPPINGS["WanCropImproved"] = WanCropImproved
     NODE_CLASS_MAPPINGS["WanStitchImproved"] = WanStitchImproved
     
-    NODE_DISPLAY_NAME_MAPPINGS["WanCropImproved"] = "WanVace-pipeline Crop âœ‚ï¸"
-    NODE_DISPLAY_NAME_MAPPINGS["WanStitchImproved"] = "WanVace-pipeline Stitch âœ‚ï¸"
+    NODE_DISPLAY_NAME_MAPPINGS["WanCropImproved"] = "Lostless Crop âœ‚ï¸"
+    NODE_DISPLAY_NAME_MAPPINGS["WanStitchImproved"] = "Lostless Stitch âœ‚ï¸"
     
-    print("[WAN Vace Pipeline] âœ… Successfully loaded crop and stitch nodes")
+    print("[Lostless Mask Editor] âœ… Successfully loaded crop and stitch nodes")
 except Exception as crop_e:
-    print(f"[WAN Vace Pipeline] âŒ ERROR loading crop and stitch nodes: {crop_e}")
+    print(f"[Lostless Mask Editor] âŒ ERROR loading crop and stitch nodes: {crop_e}")
     import traceback
     traceback.print_exc()
 
 # Try to load main nodes
 try:
     from .node_mappings import NODE_CLASS_MAPPINGS as MAIN_NODE_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as MAIN_DISPLAY_MAPPINGS
-    print(f"[WAN Vace Pipeline] Successfully loaded {len(MAIN_NODE_MAPPINGS)} nodes from node_mappings")
+    print(f"[Lostless Mask Editor] Successfully loaded {len(MAIN_NODE_MAPPINGS)} nodes from node_mappings")
     
     # Merge the main nodes with our existing mappings
     NODE_CLASS_MAPPINGS.update(MAIN_NODE_MAPPINGS)
     NODE_DISPLAY_NAME_MAPPINGS.update(MAIN_DISPLAY_MAPPINGS)
     
     # List all loaded nodes
-    print("[WAN Vace Pipeline] All loaded nodes:")
+    print("[Lostless Mask Editor] All loaded nodes:")
     for node_name in NODE_CLASS_MAPPINGS:
         print(f"  - {node_name}")
         
 except Exception as e:
-    print(f"[WAN Vace Pipeline] ERROR loading main nodes: {e}")
+    print(f"[Lostless Mask Editor] ERROR loading main nodes: {e}")
     import traceback
     traceback.print_exc()
-    print("[WAN Vace Pipeline] Continuing with mask editor and crop/stitch nodes only")
+    print("[Lostless Mask Editor] Continuing with mask editor and crop/stitch nodes only")
 
 import os
 WEB_DIRECTORY = os.path.join(os.path.dirname(__file__), "web")
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
+
 
 
 

@@ -1,10 +1,10 @@
-"""
-Node registration for WAN Vace Pipeline
+﻿"""
+Node registration for Lostless nodes
 This file imports nodes from separate modules and registers them with ComfyUI
 """
 
 import os
-print(f"[WAN Vace Pipeline] Loading node_mappings.py from: {os.path.abspath(__file__)}")
+print(f"[Lostless Nodes] Loading node_mappings.py from: {os.path.abspath(__file__)}")
 
 # Configuration flag to control which nodes are enabled
 # Set to True to enable experimental/development nodes
@@ -188,92 +188,93 @@ if WANMatchBatchSize is not None:
 # Display names for the UI
 NODE_DISPLAY_NAME_MAPPINGS = {
     # I/O Nodes
-    "WANLoadVideo": "WanVace-pipeline Load Video 🎬",
-    "WANSaveVideo": "WanVace-pipeline Save Video 💾",
+    "WANLoadVideo": "Lostless Load Video ðŸŽ¬",
+    "WANSaveVideo": "Lostless Save Video ðŸ’¾",
     
     # Processing Nodes
-    # "WANVaceSplitReferenceVideo": "WanVace-pipeline Split Video Batch ✂️",  # Disabled for release
-    "WANVaceJoinVideos": "WanVace-pipeline Join Videos 🔗",
-    "WANVaceVideoExtension": "WanVace-pipeline Video Extension 🔄",
-    "WANVaceFrameInterpolation": "WanVace-pipeline Frame Interpolator 🎞️",
+    # "WANVaceSplitReferenceVideo": "Lostless Split Video Batch âœ‚ï¸",  # Disabled for release
+    "WANVaceJoinVideos": "Lostless Join Videos ðŸ”—",
+    "WANVaceVideoExtension": "Lostless Video Extension ðŸ”„",
+    "WANVaceFrameInterpolation": "Lostless Frame Interpolator ðŸŽžï¸",
     
     # Timeline Nodes
-    "WANVaceKeyframeTimeline": "WanVace-pipeline Keyframe Timeline 📽️",
+    "WANVaceKeyframeTimeline": "Lostless Keyframe Timeline ðŸ“½ï¸",
     
     # Frame Utility Nodes
-    # "WANVaceFrameSampler": "WanVace-pipeline Frame Sampler 📊",  # Disabled for release
-    "WANVaceFrameInjector": "WanVace-pipeline Frame Injector 💉",
+    # "WANVaceFrameSampler": "Lostless Frame Sampler ðŸ“Š",  # Disabled for release
+    "WANVaceFrameInjector": "Lostless Frame Injector ðŸ’‰",
     
     # Effects Nodes
-    "WANVaceOutpainting": "WanVace-pipeline Outpainting Prep 🖼️",
-    # "WANVaceBatchStartIndex": "WanVace-pipeline Batch Start Index 🔢",  # Disabled for release
+    "WANVaceOutpainting": "Lostless Outpainting Prep ðŸ–¼ï¸",
+    # "WANVaceBatchStartIndex": "Lostless Batch Start Index ðŸ”¢",  # Disabled for release
     
     # Fast Processing Nodes
-    "WANFastImageBatchProcessor": "WanVace-pipeline Fast Image Batch Processor 🚀",
-    # "WANFastImageCompositeMasked": "WanVace-pipeline Fast Image Composite Masked 🚀",  # Disabled for release
-    # "WANFastImageBlend": "WanVace-pipeline Fast Image Blend 🚀",  # Disabled for release
-    # "WANFastImageScaleBy": "WanVace-pipeline Fast Image Scale By 🚀",  # Disabled for release
-    # "WANFastImageScaleToMegapixels": "WanVace-pipeline Fast Image Scale To Megapixels 🚀",  # Disabled for release
-    # "WANFastImageResize": "WanVace-pipeline Fast Image Resize 🚀",  # Disabled for release
+    "WANFastImageBatchProcessor": "Lostless Fast Image Batch Processor ðŸš€",
+    # "WANFastImageCompositeMasked": "Lostless Fast Image Composite Masked ðŸš€",  # Disabled for release
+    # "WANFastImageBlend": "Lostless Fast Image Blend ðŸš€",  # Disabled for release
+    # "WANFastImageScaleBy": "Lostless Fast Image Scale By ðŸš€",  # Disabled for release
+    # "WANFastImageScaleToMegapixels": "Lostless Fast Image Scale To Megapixels ðŸš€",  # Disabled for release
+    # "WANFastImageResize": "Lostless Fast Image Resize ðŸš€",  # Disabled for release
     
     # Fast ControlNet Processors
-    "WANFastDepthAnythingV2": "WanVace-pipeline Fast Depth Anything V2 🚀",
-    "WANFastDWPose": "WanVace-pipeline Fast DWPose Estimator 🚀",
+    "WANFastDepthAnythingV2": "Lostless Fast Depth Anything V2 ðŸš€",
+    "WANFastDWPose": "Lostless Fast DWPose Estimator ðŸš€",
     
     # Fast Video Processors
-    # "WANFastVideoEncode": "WanVace-pipeline Fast Video Encode 🚀",  # Disabled for release
-    # "WANFastVACEEncode": "WanVace-pipeline Fast VACE Encode 🚀",  # Disabled for release
-    # "WANFastVideoCombine": "WanVace-pipeline Fast Video Combine 🚀"  # Disabled for release
+    # "WANFastVideoEncode": "Lostless Fast Video Encode ðŸš€",  # Disabled for release
+    # "WANFastVACEEncode": "Lostless Fast VACE Encode ðŸš€",  # Disabled for release
+    # "WANFastVideoCombine": "Lostless Fast Video Combine ðŸš€"  # Disabled for release
 }
 
 # Add disabled node display names if experimental mode is enabled
 if ENABLE_EXPERIMENTAL_NODES:
     NODE_DISPLAY_NAME_MAPPINGS.update({
         # Processing Nodes
-        "WANVaceSplitReferenceVideo": "WanVace-pipeline Split Video Batch ✂️",
+        "WANVaceSplitReferenceVideo": "Lostless Split Video Batch âœ‚ï¸",
         
         # Frame Utility Nodes
-        "WANVaceFrameSampler": "WanVace-pipeline Frame Sampler 📊",
+        "WANVaceFrameSampler": "Lostless Frame Sampler ðŸ“Š",
         
         # Effects Nodes
-        "WANVaceBatchStartIndex": "WanVace-pipeline Batch Start Index 🔢",
+        "WANVaceBatchStartIndex": "Lostless Batch Start Index ðŸ”¢",
         
         # Fast Processing Nodes
-        "WANFastImageCompositeMasked": "WanVace-pipeline Fast Image Composite Masked 🚀",
-        "WANFastImageBlend": "WanVace-pipeline Fast Image Blend 🚀",
-        "WANFastImageScaleBy": "WanVace-pipeline Fast Image Scale By 🚀",
-        "WANFastImageScaleToMegapixels": "WanVace-pipeline Fast Image Scale To Megapixels 🚀",
-        "WANFastImageResize": "WanVace-pipeline Fast Image Resize 🚀",
+        "WANFastImageCompositeMasked": "Lostless Fast Image Composite Masked ðŸš€",
+        "WANFastImageBlend": "Lostless Fast Image Blend ðŸš€",
+        "WANFastImageScaleBy": "Lostless Fast Image Scale By ðŸš€",
+        "WANFastImageScaleToMegapixels": "Lostless Fast Image Scale To Megapixels ðŸš€",
+        "WANFastImageResize": "Lostless Fast Image Resize ðŸš€",
         
         # Fast Video Processors
-        "WANFastVideoEncode": "WanVace-pipeline Fast Video Encode 🚀",
-        "WANFastVACEEncode": "WanVace-pipeline Fast VACE Encode 🚀",
-        "WANFastVideoCombine": "WanVace-pipeline Fast Video Combine 🚀"
+        "WANFastVideoEncode": "Lostless Fast Video Encode ðŸš€",
+        "WANFastVACEEncode": "Lostless Fast VACE Encode ðŸš€",
+        "WANFastVideoCombine": "Lostless Fast Video Combine ðŸš€"
     })
 
 # Add VACE Loop Encoder display name if node was successfully imported
 if WANVACELoopEncoder is not None and ENABLE_EXPERIMENTAL_NODES:
-    NODE_DISPLAY_NAME_MAPPINGS["WANVACELoopEncoder"] = "WanVace-pipeline VACE Loop Encoder 🔁"
+    NODE_DISPLAY_NAME_MAPPINGS["WANVACELoopEncoder"] = "Lostless VACE Loop Encoder ðŸ”"
 
 # Add mask node display names if they were successfully imported
 # Legacy mask editor display mapping removed (MaskEditor is defined in __init__.py)
 if WANVaceMaskViewer is not None:
-    NODE_DISPLAY_NAME_MAPPINGS["WANVaceMaskViewer"] = "WanVace-pipeline Mask Viewer 👁️"
+    NODE_DISPLAY_NAME_MAPPINGS["WANVaceMaskViewer"] = "Lostless Mask Viewer ðŸ‘ï¸"
 if WANVaceTestMask is not None:
-    NODE_DISPLAY_NAME_MAPPINGS["WANVaceTestMask"] = "WanVace-pipeline Test Mask 🧪"
+    NODE_DISPLAY_NAME_MAPPINGS["WANVaceTestMask"] = "Lostless Test Mask ðŸ§ª"
 
 # Add WAN Inpaint Conditioning display name if node was successfully imported
 if WANInpaintConditioning is not None:
-    NODE_DISPLAY_NAME_MAPPINGS["WANInpaintConditioning"] = "WanVace-pipeline WAN Inpaint Conditioning 🎨"
+    NODE_DISPLAY_NAME_MAPPINGS["WANInpaintConditioning"] = "Lostless WAN Inpaint Conditioning ðŸŽ¨"
 
 # Add WAN Video Sampler Inpaint display name if node was successfully imported
 if WANVideoSamplerInpaint is not None:
-    NODE_DISPLAY_NAME_MAPPINGS["WANVideoSamplerInpaint"] = "WanVace-pipeline WAN Video Sampler Inpaint 🎭"
+    NODE_DISPLAY_NAME_MAPPINGS["WANVideoSamplerInpaint"] = "Lostless WAN Video Sampler Inpaint ðŸŽ­"
 
 # Add WAN Tiled Sampler display name if node was successfully imported
 if WANTiledSampler is not None:
-    NODE_DISPLAY_NAME_MAPPINGS["WANTiledSampler"] = "WanVace-pipeline WAN Tiled Sampler 🔲"
+    NODE_DISPLAY_NAME_MAPPINGS["WANTiledSampler"] = "Lostless WAN Tiled Sampler ðŸ”²"
 
 # Add WAN Match Batch Size display name if node was successfully imported
 if WANMatchBatchSize is not None:
-    NODE_DISPLAY_NAME_MAPPINGS["WANMatchBatchSize"] = "WanVace-pipeline Match Batch Size 🔄"
+    NODE_DISPLAY_NAME_MAPPINGS["WANMatchBatchSize"] = "Lostless Match Batch Size ðŸ”„"
+

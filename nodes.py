@@ -15,12 +15,12 @@ from server import PromptServer
 
 DEFAULT_EXTENSIONS = ".png,.jpg,.jpeg,.webp,.bmp,.gif,.tif,.tiff"
 
-def _load_embedded_wanvace_mappings():
-    """Load node mappings from embedded Lostless Mask Editor Pipeline package."""
+def _load_embedded_lostless_mappings():
+    """Load node mappings from the embedded Lostless Mask Editor package."""
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    package_dir = os.path.join(base_dir, "Lostless-Mask-Editor-Pipeline")
+    package_dir = os.path.join(base_dir, "Lostless-Mask-Editor")
     init_file = os.path.join(package_dir, "__init__.py")
-    module_name = "lostless_embedded_wanvace_pipeline"
+    module_name = "lostless_embedded_mask_editor"
 
     if not os.path.isfile(init_file):
         return {}, {}
@@ -42,10 +42,10 @@ def _load_embedded_wanvace_mappings():
 
         class_mappings = getattr(module, "NODE_CLASS_MAPPINGS", {}) or {}
         display_mappings = getattr(module, "NODE_DISPLAY_NAME_MAPPINGS", {}) or {}
-        print(f"[Lostless Nodes] Loaded embedded WanVace mappings: {len(class_mappings)} nodes")
+        print(f"[Lostless Nodes] Loaded embedded Lostless mask editor mappings: {len(class_mappings)} nodes")
         return class_mappings, display_mappings
     except Exception as e:
-        print(f"[Lostless Nodes] Failed to load embedded WanVace package: {e}")
+        print(f"[Lostless Nodes] Failed to load embedded Lostless mask editor package: {e}")
         return {}, {}
 
 def _normalize_extensions(raw_extensions: str) -> Set[str]:
@@ -198,6 +198,46 @@ class LostlessRandomizeButton:
         return (pulse,)
 
 
+class LostlessBufferNode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "mode": (["LTX (8n+1)", "WAN (4n+1)"], {"default": "LTX (8n+1)"}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    FUNCTION = "buffer"
+    CATEGORY = "lostless/nodes"
+
+    def buffer(self, images: torch.Tensor, mode: str):
+        if images is None:
+            raise ValueError("Lostless Buffer requires an IMAGE input.")
+        if images.ndim == 3:
+            images = images.unsqueeze(0)
+        if images.ndim != 4:
+            raise ValueError(f"Expected IMAGE batch [B,H,W,C], got {tuple(images.shape)}")
+
+        frame_count = int(images.shape[0])
+        if frame_count < 1:
+            raise ValueError("Lostless Buffer requires at least 1 frame.")
+
+        step = 8 if mode.startswith("LTX") else 4
+        remainder = (frame_count - 1) % step
+        target_count = frame_count if remainder == 0 else frame_count + (step - remainder)
+        pad_count = target_count - frame_count
+
+        if pad_count <= 0:
+            return (images.contiguous(),)
+
+        last_frame = images[-1:].repeat(pad_count, 1, 1, 1)
+        buffered = torch.cat([images, last_frame], dim=0)
+        return (buffered.contiguous(),)
+
+
 def _register_routes() -> None:
     routes = PromptServer.instance.routes
 
@@ -265,14 +305,17 @@ except Exception:
 NODE_CLASS_MAPPINGS = {
     "LostlessRandomImage": LostlessRandomImage,
     "LostlessRandomizeButton": LostlessRandomizeButton,
+    "LostlessBufferNode": LostlessBufferNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LostlessRandomImage": "Lostless Random Image",
     "LostlessRandomizeButton": "Lostless Randomize Button",
+    "LostlessBufferNode": "Lostless Buffer",
 }
 
-_EMBEDDED_CLASS_MAPPINGS, _EMBEDDED_DISPLAY_MAPPINGS = _load_embedded_wanvace_mappings()
+_EMBEDDED_CLASS_MAPPINGS, _EMBEDDED_DISPLAY_MAPPINGS = _load_embedded_lostless_mappings()
 NODE_CLASS_MAPPINGS.update(_EMBEDDED_CLASS_MAPPINGS)
 NODE_DISPLAY_NAME_MAPPINGS.update(_EMBEDDED_DISPLAY_MAPPINGS)
+
 
