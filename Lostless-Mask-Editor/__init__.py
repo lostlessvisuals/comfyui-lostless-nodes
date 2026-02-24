@@ -47,7 +47,6 @@ class MaskEditor:
         return {
             "required": {
                 "images": ("IMAGE",),
-                "masks": ("MASK",),
                 "edit_mode": ("BOOLEAN", {"default": True}),
                 "project_source": (
                     ["Auto", "Mask Input", "Project (Port/File)"],
@@ -67,6 +66,7 @@ class MaskEditor:
                 ),
             },
             "optional": {
+                "masks": ("MASK",),
                 "project_data_in": (
                     "STRING",
                     {
@@ -82,23 +82,40 @@ class MaskEditor:
     FUNCTION = "edit_mask"
     CATEGORY = "Mask Editor"
 
-    def _normalize_inputs(self, images, masks):
+    def _normalize_images(self, images):
         import torch
 
-        if images is None or masks is None:
-            raise ValueError("MaskEditor requires both `images` and `masks` inputs.")
+        if images is None:
+            raise ValueError("MaskEditor requires an `images` input.")
 
         if images.ndim == 3:
             images = images.unsqueeze(0)
-        if masks.ndim == 2:
-            masks = masks.unsqueeze(0)
 
         if images.ndim != 4:
             raise ValueError(f"`images` must be IMAGE batch [B,H,W,C], got shape {tuple(images.shape)}")
+        if not isinstance(images, torch.Tensor):
+            raise ValueError("Unexpected non-tensor IMAGE input.")
+
+        return images
+
+    def _normalize_masks(self, masks, image_shape):
+        import torch
+
+        if masks is None:
+            raise ValueError("MaskEditor requires a `masks` input unless project mode is active.")
+
+        if masks.ndim == 2:
+            masks = masks.unsqueeze(0)
+
         if masks.ndim != 3:
             raise ValueError(f"`masks` must be MASK batch [B,H,W], got shape {tuple(masks.shape)}")
+        if not isinstance(masks, torch.Tensor):
+            raise ValueError("Unexpected non-tensor MASK input.")
 
-        image_frames = int(images.shape[0])
+        image_frames = int(image_shape[0])
+        image_h = int(image_shape[1])
+        image_w = int(image_shape[2])
+
         mask_frames = int(masks.shape[0])
         if image_frames != mask_frames:
             raise ValueError(
@@ -106,16 +123,22 @@ class MaskEditor:
                 "Counts must match exactly."
             )
 
-        if int(images.shape[1]) != int(masks.shape[1]) or int(images.shape[2]) != int(masks.shape[2]):
+        if image_h != int(masks.shape[1]) or image_w != int(masks.shape[2]):
             raise ValueError(
-                f"Spatial mismatch: images are {tuple(images.shape[1:3])}, masks are {tuple(masks.shape[1:3])}. "
+                f"Spatial mismatch: images are {(image_h, image_w)}, masks are {tuple(masks.shape[1:3])}. "
                 "Height and width must match."
             )
 
-        if not isinstance(images, torch.Tensor) or not isinstance(masks, torch.Tensor):
-            raise ValueError("Unexpected non-tensor IMAGE or MASK input.")
+        return masks
 
-        return images, masks
+    def _make_zero_masks_like_images(self, images):
+        import torch
+
+        return torch.zeros(
+            (int(images.shape[0]), int(images.shape[1]), int(images.shape[2])),
+            dtype=torch.float32,
+            device=images.device,
+        )
 
     def _mask_to_bw_image(self, masks):
         import torch
@@ -158,10 +181,28 @@ class MaskEditor:
             raise ValueError("Project data must decode to a JSON object.")
         return parsed
 
+    def _filter_project_frames(self, project_data, frame_count):
+        def _filter_frame_dict(value):
+            if not isinstance(value, dict):
+                return {}
+            filtered = {}
+            for key, item in value.items():
+                try:
+                    idx = int(key)
+                except Exception:
+                    continue
+                if 0 <= idx < frame_count:
+                    filtered[str(idx)] = item
+            return filtered
+
+        project_data["shape_keyframes"] = _filter_frame_dict(project_data.get("shape_keyframes", {}))
+        project_data["mask_frames"] = _filter_frame_dict(project_data.get("mask_frames", {}))
+        return project_data
+
     def edit_mask(
         self,
         images,
-        masks,
+        masks=None,
         edit_mode=True,
         project_source="Auto",
         project_file_action="None",
@@ -176,7 +217,7 @@ class MaskEditor:
         import tempfile
         import torch
 
-        images, masks = self._normalize_inputs(images, masks)
+        images = self._normalize_images(images)
 
         project_file_action = str(project_file_action or "None")
         project_source = str(project_source or "Auto")
@@ -200,6 +241,12 @@ class MaskEditor:
             use_project = bool(incoming_project_text)
         elif project_source == "Mask Input":
             use_project = False
+
+        if use_project:
+            # Project mode intentionally ignores the mask port to avoid conflicting sources.
+            masks = self._make_zero_masks_like_images(images)
+        else:
+            masks = self._normalize_masks(masks, images.shape)
 
         if not edit_mode:
             return (masks, self._mask_to_bw_image(masks), incoming_project_text if use_project else "")
@@ -277,6 +324,7 @@ class MaskEditor:
             project_data.setdefault("mask_frames", {})
             project_data.setdefault("settings", {})
             project_data.setdefault("current_frame", 0)
+            project_data = self._filter_project_frames(project_data, frame_count)
 
             if not project_data["shape_keyframes"] and not project_data["mask_frames"]:
                 # Fallback if imported project is effectively empty.
