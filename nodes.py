@@ -42,8 +42,21 @@ def _load_embedded_lostless_mappings():
 
         class_mappings = getattr(module, "NODE_CLASS_MAPPINGS", {}) or {}
         display_mappings = getattr(module, "NODE_DISPLAY_NAME_MAPPINGS", {}) or {}
-        print(f"[Lostless Nodes] Loaded embedded Lostless mask editor mappings: {len(class_mappings)} nodes")
-        return class_mappings, display_mappings
+
+        # Only expose the embedded editor nodes we intentionally support in this package.
+        allowed_embedded_nodes = {"MaskEditor", "WANVaceImageToMask"}
+        filtered_class_mappings = {
+            key: value for key, value in class_mappings.items() if key in allowed_embedded_nodes
+        }
+        filtered_display_mappings = {
+            key: value for key, value in display_mappings.items() if key in allowed_embedded_nodes
+        }
+
+        print(
+            "[Lostless Nodes] Loaded embedded Lostless mask editor mappings: "
+            f"{len(filtered_class_mappings)} exposed / {len(class_mappings)} available"
+        )
+        return filtered_class_mappings, filtered_display_mappings
     except Exception as e:
         print(f"[Lostless Nodes] Failed to load embedded Lostless mask editor package: {e}")
         return {}, {}
