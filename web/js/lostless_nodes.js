@@ -416,12 +416,23 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value) || 0));
 }
 
-function buildDefaultCut(frame, transitionFrames) {
+function buildDefaultCut(frame, transitionFrames, removeBufferEachSide = 0) {
   return {
-    start: Math.max(0, Number(frame) || 0),
-    end: Math.max(0, Number(frame) || 0),
+    center: Math.max(0, Number(frame) || 0),
+    remove_buffer_each_side: Math.max(0, Number(removeBufferEachSide) || 0),
     transition_frames: Math.max(0, Number(transitionFrames) || 0),
   };
+}
+
+function cutRange(cut) {
+  const center = Math.max(0, Number(cut?.center ?? cut?.cut_frame ?? cut?.frame) || 0);
+  const buffer = Math.max(
+    0,
+    Number(cut?.remove_buffer_each_side ?? cut?.buffer_each_side ?? cut?.buffer) || 0
+  );
+  const start = Math.max(0, center - buffer);
+  const end = Math.max(start, center + buffer);
+  return { center, buffer, start, end };
 }
 
 async function openLoopCutPlanner(node) {
@@ -432,9 +443,11 @@ async function openLoopCutPlanner(node) {
   const videoInfoWidget = getWidget(node, "video_info_json");
   const refreshWidget = getWidget(node, "ui_refresh");
   const defaultTransitionWidget = getWidget(node, "default_transition_frames");
+  const defaultSourceWidget = getWidget(node, "default_source_frames");
+  const defaultOverlapWidget = getWidget(node, "default_overlap_frames");
 
   if (!videoPathWidget || !cutsJsonWidget || !defaultTransitionWidget) {
-    throw new Error("Loop planner widgets are missing.");
+    throw new Error("Loop cutter widgets are missing.");
   }
 
   const inferredVideoPath = getConnectedVhsVideoPath(node);
@@ -442,36 +455,38 @@ async function openLoopCutPlanner(node) {
     setWidgetValue(videoPathWidget, inferredVideoPath, node);
   }
 
+  const loadedCuts = parseJsonSafe(String(cutsJsonWidget.value || "[]"), []);
+  const normalizedCuts = Array.isArray(loadedCuts)
+    ? loadedCuts
+        .filter((c) => c && typeof c === "object")
+        .map((c) => {
+          const r = cutRange(c);
+          return {
+            center: r.center,
+            remove_buffer_each_side: r.buffer,
+            transition_frames: Math.max(
+              0,
+              Number(c.transition_frames ?? defaultTransitionWidget.value ?? 0) || 0
+            ),
+          };
+        })
+    : [];
+
   const state = {
     path: String(videoPathWidget.value || inferredVideoPath || ""),
     meta: parseJsonSafe(String(videoInfoWidget?.value || "{}"), {}),
-    cuts: parseJsonSafe(String(cutsJsonWidget.value || "[]"), []),
+    cuts: normalizedCuts,
     currentFrame: 0,
-    pendingStart: null,
-    pendingEnd: null,
+    selectedCutIndex: normalizedCuts.length ? 0 : -1,
     frameUrl: null,
     frameRequestId: 0,
-    loadingFrame: false,
     frameCache: new Map(),
     frameCacheOrder: [],
     maxCachedFrames: 80,
     sliderTimer: null,
     keyHandler: null,
+    timelineCanvas: null,
   };
-
-  if (!Array.isArray(state.cuts)) {
-    state.cuts = [];
-  }
-  state.cuts = state.cuts
-    .filter((c) => c && typeof c === "object")
-    .map((c) => ({
-      start: Math.max(0, Number(c.start) || 0),
-      end: Math.max(0, Number(c.end) || 0),
-      transition_frames: Math.max(
-        0,
-        Number(c.transition_frames ?? defaultTransitionWidget.value ?? 0) || 0
-      ),
-    }));
 
   const overlay = document.createElement("div");
   overlay.className = "lostless-loop-overlay";
@@ -482,12 +497,12 @@ async function openLoopCutPlanner(node) {
 
   modal.innerHTML = `
     <div class="lostless-loop-header">
-      <span class="lostless-loop-muted">Video</span>
-      <input type="text" class="ll-video-path" placeholder="C:/path/to/video.mp4" />
-      <button class="lostless-loop-btn ll-load">Load</button>
+      <span class="lostless-loop-muted">Loop Cutter</span>
+      <span class="lostless-loop-muted ll-source-label" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+      <button class="lostless-loop-btn ll-reload">Reload Video</button>
       <button class="lostless-loop-btn ll-close">Close</button>
     </div>
-    <div class="lostless-loop-main">
+    <div class="lostless-loop-main" style="grid-template-columns: 1fr;">
       <div class="lostless-loop-pane">
         <div class="lostless-loop-preview-wrap"><img class="ll-preview" alt="Video frame preview" /></div>
         <div class="lostless-loop-controls">
@@ -499,38 +514,46 @@ async function openLoopCutPlanner(node) {
             <input type="number" class="ll-frame-input" min="0" step="1" value="0" />
             <button class="lostless-loop-btn ll-step" data-step="1">Next</button>
             <button class="lostless-loop-btn ll-step" data-step="10">Next 10</button>
+            <button class="lostless-loop-btn primary ll-add-cut">Add Cut @ Current</button>
           </div>
           <div class="lostless-loop-row">
             <input type="range" class="ll-frame-slider" min="0" max="0" step="1" value="0" />
           </div>
           <div class="lostless-loop-row">
-            <button class="lostless-loop-btn ll-mark-start">Set Start = Current</button>
-            <button class="lostless-loop-btn ll-mark-end">Set End = Current</button>
-            <button class="lostless-loop-btn primary ll-add-cut">Add Cut</button>
-            <button class="lostless-loop-btn ll-add-single">Add 1-Frame Cut</button>
+            <canvas class="ll-timeline" width="1000" height="86" style="width:100%; height:86px; background:#0d1118; border:1px solid #273041; border-radius:8px; cursor:pointer;"></canvas>
+          </div>
+          <div class="lostless-loop-row" style="justify-content:space-between;">
+            <span class="lostless-loop-muted">Timeline: ticks = frames, bars = removed region, yellow line = cut frame</span>
+            <span class="lostless-loop-muted">Keys: Left/Right, Shift+Left/Right, C add cut</span>
+          </div>
+          <div class="lostless-loop-row" style="border-top:1px solid #252e3e; padding-top:8px;">
+            <span class="lostless-loop-muted">Selected Cut</span>
+            <button class="lostless-loop-btn ll-prev-cut">Prev Cut</button>
+            <button class="lostless-loop-btn ll-next-cut">Next Cut</button>
+            <button class="lostless-loop-btn danger ll-delete-cut">Delete Cut</button>
           </div>
           <div class="lostless-loop-row">
-            <span class="lostless-loop-muted">Pending Start: <strong class="ll-pending-start">-</strong></span>
-            <span class="lostless-loop-muted">Pending End: <strong class="ll-pending-end">-</strong></span>
-            <span class="lostless-loop-muted">Keys: Left/Right = frame, Shift+Left/Right = 10, [ = start, ] = end</span>
+            <span class="lostless-loop-label">Cut Frame</span>
+            <input type="number" class="ll-cut-center" min="0" step="1" value="0" />
+            <span class="lostless-loop-label">Buffer/Side</span>
+            <input type="number" class="ll-cut-buffer" min="0" step="1" value="0" />
+            <span class="lostless-loop-label">Transition</span>
+            <input type="number" class="ll-cut-transition" min="0" step="1" value="0" />
+            <button class="lostless-loop-btn ll-jump-cut">Jump To Cut</button>
           </div>
-        </div>
-      </div>
-      <div class="lostless-loop-pane">
-        <div class="lostless-loop-cuts">
+          <div class="lostless-loop-row" style="border-top:1px solid #252e3e; padding-top:8px;">
+            <span class="lostless-loop-muted">Defaults (saved inside node but edited here)</span>
+          </div>
           <div class="lostless-loop-row">
-            <span class="lostless-loop-muted">Cuts</span>
-            <button class="lostless-loop-btn ll-sort">Sort</button>
-            <button class="lostless-loop-btn danger ll-clear">Clear All</button>
+            <span class="lostless-loop-label">Def Buffer</span>
+            <input type="number" class="ll-default-buffer" min="0" step="1" value="0" />
+            <span class="lostless-loop-label">Def Transition</span>
+            <input type="number" class="ll-default-transition" min="0" step="1" value="0" />
+            <span class="lostless-loop-label">Source</span>
+            <input type="number" class="ll-default-source" min="1" step="1" value="16" />
+            <span class="lostless-loop-label">Overlap</span>
+            <input type="number" class="ll-default-overlap" min="0" step="1" value="8" />
           </div>
-          <div class="lostless-loop-cut-head">
-            <div>#</div>
-            <div>Start</div>
-            <div>End</div>
-            <div>Transition</div>
-            <div></div>
-          </div>
-          <div class="ll-cut-list"></div>
         </div>
       </div>
     </div>
@@ -540,44 +563,37 @@ async function openLoopCutPlanner(node) {
       </div>
       <div class="right">
         <button class="lostless-loop-btn ll-cancel">Cancel</button>
-        <button class="lostless-loop-btn primary ll-save">Save Cuts To Node</button>
+        <button class="lostless-loop-btn primary ll-save">Save To Node</button>
       </div>
     </div>
   `;
 
   document.body.appendChild(overlay);
 
-  const pathInput = modal.querySelector(".ll-video-path");
-  const loadButton = modal.querySelector(".ll-load");
-  const closeButton = modal.querySelector(".ll-close");
-  const cancelButton = modal.querySelector(".ll-cancel");
-  const saveButton = modal.querySelector(".ll-save");
   const previewImg = modal.querySelector(".ll-preview");
   const statusEl = modal.querySelector(".ll-status");
   const summaryEl = modal.querySelector(".ll-summary");
+  const sourceLabelEl = modal.querySelector(".ll-source-label");
   const sliderEl = modal.querySelector(".ll-frame-slider");
   const frameInputEl = modal.querySelector(".ll-frame-input");
-  const cutListEl = modal.querySelector(".ll-cut-list");
-  const pendingStartEl = modal.querySelector(".ll-pending-start");
-  const pendingEndEl = modal.querySelector(".ll-pending-end");
+  const timelineCanvas = modal.querySelector(".ll-timeline");
+  const cutCenterEl = modal.querySelector(".ll-cut-center");
+  const cutBufferEl = modal.querySelector(".ll-cut-buffer");
+  const cutTransitionEl = modal.querySelector(".ll-cut-transition");
+  const defaultBufferEl = modal.querySelector(".ll-default-buffer");
+  const defaultTransitionEl = modal.querySelector(".ll-default-transition");
+  const defaultSourceEl = modal.querySelector(".ll-default-source");
+  const defaultOverlapEl = modal.querySelector(".ll-default-overlap");
+  const reloadButton = modal.querySelector(".ll-reload");
+  const closeButton = modal.querySelector(".ll-close");
+  const cancelButton = modal.querySelector(".ll-cancel");
+  const saveButton = modal.querySelector(".ll-save");
 
-  pathInput.value = state.path;
-
-  function cleanup() {
-    if (state.frameUrl) {
-      URL.revokeObjectURL(state.frameUrl);
-      state.frameUrl = null;
-    }
-    if (state.sliderTimer) {
-      clearTimeout(state.sliderTimer);
-      state.sliderTimer = null;
-    }
-    if (state.keyHandler) {
-      window.removeEventListener("keydown", state.keyHandler);
-      state.keyHandler = null;
-    }
-    overlay.remove();
-  }
+  state.timelineCanvas = timelineCanvas;
+  defaultBufferEl.value = String(Math.max(0, Number(defaultOverlapWidget?.value) || 0));
+  defaultTransitionEl.value = String(Math.max(0, Number(defaultTransitionWidget.value) || 0));
+  defaultSourceEl.value = String(Math.max(1, Number(defaultSourceWidget?.value) || 16));
+  defaultOverlapEl.value = String(Math.max(0, Number(defaultOverlapWidget?.value) || 8));
 
   function setStatus(message) {
     statusEl.textContent = String(message || "");
@@ -585,6 +601,22 @@ async function openLoopCutPlanner(node) {
 
   function getFrameCount() {
     return Math.max(0, Number(state.meta?.frame_count) || 0);
+  }
+
+  function cleanup() {
+    if (state.frameUrl) {
+      URL.revokeObjectURL(state.frameUrl);
+      state.frameUrl = null;
+    }
+    if (state.sliderTimer) clearTimeout(state.sliderTimer);
+    if (state.keyHandler) window.removeEventListener("keydown", state.keyHandler);
+    overlay.remove();
+  }
+
+  function syncSourceLabel() {
+    sourceLabelEl.textContent = state.path
+      ? `Source: ${state.path}`
+      : "Source: connect VHS_LoadVideo (IMAGE) to auto-detect video";
   }
 
   function syncFrameControls() {
@@ -597,51 +629,19 @@ async function openLoopCutPlanner(node) {
     frameInputEl.value = String(state.currentFrame);
   }
 
-  function refreshPendingLabels() {
-    pendingStartEl.textContent = state.pendingStart == null ? "-" : String(state.pendingStart);
-    pendingEndEl.textContent = state.pendingEnd == null ? "-" : String(state.pendingEnd);
-  }
-
-  function sortCutsInPlace() {
-    state.cuts.sort((a, b) => {
-      const sa = Number(a.start) || 0;
-      const sb = Number(b.start) || 0;
-      if (sa !== sb) return sa - sb;
-      return (Number(a.end) || 0) - (Number(b.end) || 0);
-    });
-  }
-
-  function updateSummary() {
-    const frameCount = getFrameCount();
-    const totalRemoved = state.cuts.reduce((sum, cut) => {
-      const start = Number(cut.start) || 0;
-      const end = Number(cut.end) || 0;
-      return sum + Math.max(0, end - start + 1);
-    }, 0);
-    const metaText = frameCount
-      ? `${frameCount} frames | ${Number(state.meta?.fps || 0).toFixed(3)} fps | ${state.meta?.width || 0}x${state.meta?.height || 0}`
-      : "No video loaded";
-    const finalCount = frameCount ? Math.max(0, frameCount - totalRemoved) : "?";
-    summaryEl.textContent = `${metaText} | cuts: ${state.cuts.length} | removed: ${totalRemoved} | final: ${finalCount}`;
-  }
-
   function cacheFrameBlob(frameIndex, blob) {
     state.frameCache.set(frameIndex, blob);
     state.frameCacheOrder = state.frameCacheOrder.filter((n) => n !== frameIndex);
     state.frameCacheOrder.push(frameIndex);
     while (state.frameCacheOrder.length > state.maxCachedFrames) {
       const oldest = state.frameCacheOrder.shift();
-      if (oldest != null) {
-        state.frameCache.delete(oldest);
-      }
+      if (oldest != null) state.frameCache.delete(oldest);
     }
   }
 
   async function getCachedFrameBlob(frameIndex) {
-    if (state.frameCache.has(frameIndex)) {
-      return state.frameCache.get(frameIndex);
-    }
-    const blob = await fetchVideoFrameBlob(pathInput.value, frameIndex, 640);
+    if (state.frameCache.has(frameIndex)) return state.frameCache.get(frameIndex);
+    const blob = await fetchVideoFrameBlob(state.path, frameIndex, 640);
     cacheFrameBlob(frameIndex, blob);
     return blob;
   }
@@ -652,84 +652,226 @@ async function openLoopCutPlanner(node) {
     const candidates = [centerIndex - 1, centerIndex + 1, centerIndex - 10, centerIndex + 10]
       .map((n) => clamp(n, 0, frameCount - 1))
       .filter((n, i, arr) => arr.indexOf(n) === i && !state.frameCache.has(n));
-
     for (const idx of candidates.slice(0, 2)) {
       getCachedFrameBlob(idx).catch(() => {});
     }
   }
 
-  function renderCutRows() {
-    cutListEl.innerHTML = "";
-    state.cuts.forEach((cut, index) => {
-      const row = document.createElement("div");
-      row.className = "lostless-loop-cut-row";
-      row.innerHTML = `
-        <div>${index + 1}</div>
-        <input type="number" min="0" step="1" value="${Math.max(0, Number(cut.start) || 0)}" data-field="start" />
-        <input type="number" min="0" step="1" value="${Math.max(0, Number(cut.end) || 0)}" data-field="end" />
-        <input type="number" min="0" step="1" value="${Math.max(0, Number(cut.transition_frames) || 0)}" data-field="transition_frames" />
-        <button class="lostless-loop-btn danger" data-action="delete">Delete</button>
-      `;
+  function frameToX(frame, width, frameCount) {
+    if (frameCount <= 1) return 0;
+    return (frame / (frameCount - 1)) * (width - 1);
+  }
 
-      row.querySelectorAll("input").forEach((input) => {
-        input.addEventListener("change", () => {
-          const field = input.dataset.field;
-          cut[field] = Math.max(0, Number(input.value) || 0);
-          updateSummary();
-        });
-      });
+  function drawTimeline() {
+    if (!timelineCanvas) return;
+    const ctx = timelineCanvas.getContext("2d");
+    if (!ctx) return;
+    const frameCount = getFrameCount();
+    const w = timelineCanvas.clientWidth || 900;
+    const h = timelineCanvas.clientHeight || 86;
+    if (timelineCanvas.width !== w) timelineCanvas.width = w;
+    if (timelineCanvas.height !== h) timelineCanvas.height = h;
 
-      row.querySelector("[data-action='delete']")?.addEventListener("click", () => {
-        state.cuts.splice(index, 1);
-        renderCutRows();
-        updateSummary();
-      });
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "#0d1118";
+    ctx.fillRect(0, 0, w, h);
 
-      cutListEl.appendChild(row);
+    if (!frameCount) {
+      ctx.fillStyle = "#95a7c4";
+      ctx.font = "12px ui-sans-serif, system-ui";
+      ctx.fillText("Connect/load a video to draw timeline", 12, 22);
+      return;
+    }
+
+    const tickY0 = 46;
+    const tickY1 = h - 10;
+    const maxTicks = Math.min(frameCount, 1200);
+    const tickStep = Math.max(1, Math.ceil(frameCount / maxTicks));
+    for (let f = 0; f < frameCount; f += tickStep) {
+      const x = frameToX(f, w, frameCount);
+      const major = (f % 10) === 0;
+      ctx.strokeStyle = major ? "#33465f" : "#263343";
+      ctx.beginPath();
+      ctx.moveTo(x + 0.5, major ? tickY0 - 8 : tickY0);
+      ctx.lineTo(x + 0.5, tickY1);
+      ctx.stroke();
+    }
+
+    // Removed regions bars
+    state.cuts.forEach((cut, idx) => {
+      const r = cutRange(cut);
+      const start = clamp(r.start, 0, frameCount - 1);
+      const end = clamp(r.end, 0, frameCount - 1);
+      const x0 = frameToX(start, w, frameCount);
+      const x1 = frameToX(end, w, frameCount);
+      const selected = idx === state.selectedCutIndex;
+      ctx.fillStyle = selected ? "rgba(55, 195, 255, 0.35)" : "rgba(236, 93, 80, 0.28)";
+      ctx.fillRect(Math.min(x0, x1), 30, Math.max(2, Math.abs(x1 - x0)), 14);
+      ctx.strokeStyle = selected ? "rgba(90, 220, 255, 0.9)" : "rgba(255, 132, 120, 0.8)";
+      ctx.strokeRect(Math.min(x0, x1), 30.5, Math.max(2, Math.abs(x1 - x0)), 13);
+
+      const cx = frameToX(r.center, w, frameCount);
+      ctx.strokeStyle = selected ? "#ffe178" : "#d9b24d";
+      ctx.beginPath();
+      ctx.moveTo(cx + 0.5, 14);
+      ctx.lineTo(cx + 0.5, h - 6);
+      ctx.stroke();
     });
+
+    // Current frame indicator
+    const curX = frameToX(state.currentFrame, w, frameCount);
+    ctx.strokeStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.moveTo(curX + 0.5, 0);
+    ctx.lineTo(curX + 0.5, h);
+    ctx.stroke();
+
+    ctx.fillStyle = "#c7d6ec";
+    ctx.font = "12px ui-sans-serif, system-ui";
+    ctx.fillText(`Current: ${state.currentFrame}`, 10, 14);
+  }
+
+  function updateSummary() {
+    const frameCount = getFrameCount();
+    const totalRemoved = state.cuts.reduce((sum, cut) => {
+      const r = cutRange(cut);
+      return sum + (r.end - r.start + 1);
+    }, 0);
+    const finalCount = frameCount ? Math.max(0, frameCount - totalRemoved) : "?";
+    const fps = Number(state.meta?.fps || 0);
+    const wh = `${state.meta?.width || 0}x${state.meta?.height || 0}`;
+    summaryEl.textContent = frameCount
+      ? `${frameCount} frames | ${fps.toFixed(3)} fps | ${wh} | removed ${totalRemoved} | final ${finalCount}`
+      : "No video loaded";
+    drawTimeline();
+  }
+
+  function clampCutToBounds(cut) {
+    const frameCount = getFrameCount();
+    if (!frameCount) return cut;
+    let center = clamp(Number(cut.center) || 0, 0, frameCount - 1);
+    let buffer = Math.max(0, Number(cut.remove_buffer_each_side) || 0);
+    buffer = Math.min(buffer, center, (frameCount - 1) - center);
+    return {
+      center,
+      remove_buffer_each_side: buffer,
+      transition_frames: Math.max(0, Number(cut.transition_frames) || 0),
+    };
+  }
+
+  function setSelectedCut(index) {
+    if (!state.cuts.length) {
+      state.selectedCutIndex = -1;
+      cutCenterEl.value = "0";
+      cutBufferEl.value = String(Math.max(0, Number(defaultBufferEl.value) || 0));
+      cutTransitionEl.value = String(Math.max(0, Number(defaultTransitionEl.value) || 0));
+      drawTimeline();
+      return;
+    }
+    state.selectedCutIndex = clamp(index, 0, state.cuts.length - 1);
+    const cut = clampCutToBounds(state.cuts[state.selectedCutIndex]);
+    state.cuts[state.selectedCutIndex] = cut;
+    cutCenterEl.value = String(cut.center);
+    cutBufferEl.value = String(cut.remove_buffer_each_side);
+    cutTransitionEl.value = String(cut.transition_frames);
+    drawTimeline();
+  }
+
+  function sortCutsAndPreserveSelection() {
+    const selected = state.selectedCutIndex >= 0 ? state.cuts[state.selectedCutIndex] : null;
+    state.cuts.sort((a, b) => {
+      const ac = Number(a.center) || 0;
+      const bc = Number(b.center) || 0;
+      if (ac !== bc) return ac - bc;
+      return (Number(a.remove_buffer_each_side) || 0) - (Number(b.remove_buffer_each_side) || 0);
+    });
+    if (selected) {
+      state.selectedCutIndex = state.cuts.indexOf(selected);
+    }
+    if (state.selectedCutIndex < 0 && state.cuts.length) state.selectedCutIndex = 0;
+  }
+
+  function applySelectedCutInputs() {
+    if (state.selectedCutIndex < 0 || state.selectedCutIndex >= state.cuts.length) return;
+    state.cuts[state.selectedCutIndex] = clampCutToBounds({
+      center: Number(cutCenterEl.value) || 0,
+      remove_buffer_each_side: Number(cutBufferEl.value) || 0,
+      transition_frames: Number(cutTransitionEl.value) || 0,
+    });
+    sortCutsAndPreserveSelection();
+    setSelectedCut(state.selectedCutIndex);
+    updateSummary();
+  }
+
+  function validateCutsForSave() {
+    const frameCount = getFrameCount();
+    const cuts = state.cuts
+      .map((cut) => clampCutToBounds(cut))
+      .sort((a, b) => (a.center - b.center) || (a.remove_buffer_each_side - b.remove_buffer_each_side));
+
+    for (let i = 0; i < cuts.length; i++) {
+      const a = cutRange(cuts[i]);
+      if (frameCount && (a.end >= frameCount || a.start < 0)) {
+        throw new Error(`Cut ${i + 1} exceeds frame bounds.`);
+      }
+      if (i > 0) {
+        const prev = cutRange(cuts[i - 1]);
+        if (a.start <= prev.end) {
+          throw new Error(`Cuts overlap (${i} and ${i + 1}). Reduce buffer on one cut.`);
+        }
+      }
+    }
+    return cuts;
+  }
+
+  function syncDefaultsToWidgets() {
+    setWidgetValue(defaultTransitionWidget, Math.max(0, Number(defaultTransitionEl.value) || 0), node);
+    if (defaultSourceWidget) setWidgetValue(defaultSourceWidget, Math.max(1, Number(defaultSourceEl.value) || 1), node);
+    if (defaultOverlapWidget) setWidgetValue(defaultOverlapWidget, Math.max(0, Number(defaultOverlapEl.value) || 0), node);
   }
 
   async function renderFrame(frameIndex) {
     const frameCount = getFrameCount();
-    if (!frameCount) {
-      return;
-    }
+    if (!frameCount || !state.path) return;
 
     state.currentFrame = clamp(frameIndex, 0, frameCount - 1);
     syncFrameControls();
+    drawTimeline();
     setStatus(`Loading frame ${state.currentFrame}...`);
 
     const reqId = ++state.frameRequestId;
     try {
       const blob = await getCachedFrameBlob(state.currentFrame);
-      if (reqId !== state.frameRequestId) {
-        return;
-      }
-      if (state.frameUrl) {
-        URL.revokeObjectURL(state.frameUrl);
-      }
+      if (reqId !== state.frameRequestId) return;
+      if (state.frameUrl) URL.revokeObjectURL(state.frameUrl);
       state.frameUrl = URL.createObjectURL(blob);
       previewImg.src = state.frameUrl;
       setStatus(`Frame ${state.currentFrame} / ${frameCount - 1}`);
       prefetchNeighborFrames(state.currentFrame);
+      drawTimeline();
     } catch (error) {
-      if (reqId !== state.frameRequestId) {
-        return;
-      }
+      if (reqId !== state.frameRequestId) return;
       setStatus(error?.message || String(error));
     }
   }
 
   async function loadVideo() {
-    const path = String(pathInput.value || "").trim();
-    if (!path) {
-      setStatus("Enter a video path first.");
+    const inferred = getConnectedVhsVideoPath(node);
+    if (inferred && inferred !== state.path) {
+      state.path = inferred;
+      setWidgetValue(videoPathWidget, inferred, node);
+    }
+
+    syncSourceLabel();
+    if (!state.path) {
+      setStatus("Connect VHS_LoadVideo IMAGE to this node so the cutter can detect the source video.");
+      updateSummary();
       return;
     }
 
     setStatus("Loading video metadata...");
     try {
-      const meta = await fetchVideoMeta(path);
+      const meta = await fetchVideoMeta(state.path);
       state.meta = {
         path: meta.path,
         frame_count: Number(meta.frame_count) || 0,
@@ -737,154 +879,145 @@ async function openLoopCutPlanner(node) {
         width: Number(meta.width) || 0,
         height: Number(meta.height) || 0,
       };
-      state.path = path;
+      state.path = meta.path || state.path;
+      state.frameCache.clear();
+      state.frameCacheOrder = [];
+      syncSourceLabel();
       syncFrameControls();
-      refreshPendingLabels();
+      sortCutsAndPreserveSelection();
+      setSelectedCut(state.selectedCutIndex);
       updateSummary();
       await renderFrame(state.currentFrame);
     } catch (error) {
       setStatus(error?.message || String(error));
-    }
-  }
-
-  function addPendingCut(singleFrame = false) {
-    const defaultTransition = Math.max(0, Number(defaultTransitionWidget.value) || 0);
-    if (singleFrame) {
-      state.cuts.push(buildDefaultCut(state.currentFrame, defaultTransition));
-      renderCutRows();
       updateSummary();
-      return;
     }
-
-    if (state.pendingStart == null || state.pendingEnd == null) {
-      setStatus("Set both Start and End before adding a cut.");
-      return;
-    }
-
-    const start = Math.min(state.pendingStart, state.pendingEnd);
-    const end = Math.max(state.pendingStart, state.pendingEnd);
-    state.cuts.push({
-      start,
-      end,
-      transition_frames: defaultTransition,
-    });
-    state.pendingStart = null;
-    state.pendingEnd = null;
-    refreshPendingLabels();
-    renderCutRows();
-    updateSummary();
-    setStatus(`Added cut [${start}, ${end}]`);
   }
 
-  function validateCutsForSave() {
-    const frameCount = getFrameCount();
-    const normalized = state.cuts.map((cut, i) => {
-      const start = Math.max(0, Number(cut.start) || 0);
-      const end = Math.max(0, Number(cut.end) || 0);
-      const transition = Math.max(0, Number(cut.transition_frames) || 0);
-      if (end < start) {
-        throw new Error(`Cut ${i + 1}: end must be >= start`);
-      }
-      if (frameCount && (start >= frameCount || end >= frameCount)) {
-        throw new Error(`Cut ${i + 1}: frame range [${start}, ${end}] exceeds 0..${frameCount - 1}`);
-      }
-      return { start, end, transition_frames: transition };
-    });
+  function addCutAtCurrent() {
+    const cut = clampCutToBounds(
+      buildDefaultCut(
+        state.currentFrame,
+        Number(defaultTransitionEl.value) || 0,
+        Number(defaultBufferEl.value) || 0
+      )
+    );
+    state.cuts.push(cut);
+    sortCutsAndPreserveSelection();
+    setSelectedCut(state.cuts.indexOf(cut));
+    updateSummary();
+  }
 
-    normalized.sort((a, b) => (a.start - b.start) || (a.end - b.end));
-    for (let i = 1; i < normalized.length; i++) {
-      if (normalized[i].start <= normalized[i - 1].end) {
-        throw new Error(
-          `Cuts overlap: [${normalized[i - 1].start}, ${normalized[i - 1].end}] and [${normalized[i].start}, ${normalized[i].end}]`
-        );
-      }
+  function deleteSelectedCut() {
+    if (state.selectedCutIndex < 0 || state.selectedCutIndex >= state.cuts.length) return;
+    state.cuts.splice(state.selectedCutIndex, 1);
+    if (!state.cuts.length) {
+      state.selectedCutIndex = -1;
+    } else if (state.selectedCutIndex >= state.cuts.length) {
+      state.selectedCutIndex = state.cuts.length - 1;
     }
-    return normalized;
+    setSelectedCut(state.selectedCutIndex);
+    updateSummary();
   }
 
   function saveToNode() {
     const normalizedCuts = validateCutsForSave();
     const videoInfo = {
-      path: String(pathInput.value || "").trim(),
+      path: String(state.path || ""),
       frame_count: Number(state.meta?.frame_count) || 0,
       fps: Number(state.meta?.fps) || 0,
       width: Number(state.meta?.width) || 0,
       height: Number(state.meta?.height) || 0,
     };
 
+    syncDefaultsToWidgets();
     setWidgetValue(videoPathWidget, videoInfo.path, node);
     setWidgetValue(cutsJsonWidget, JSON.stringify(normalizedCuts, null, 2), node);
-    if (videoInfoWidget) {
-      setWidgetValue(videoInfoWidget, JSON.stringify(videoInfo), node);
-    }
-
-    if (refreshWidget) {
-      const nextValue = (Number(refreshWidget.value) || 0) + 1;
-      setWidgetValue(refreshWidget, nextValue, node);
-    }
+    if (videoInfoWidget) setWidgetValue(videoInfoWidget, JSON.stringify(videoInfo), node);
+    if (refreshWidget) setWidgetValue(refreshWidget, (Number(refreshWidget.value) || 0) + 1, node);
 
     markNodeDirty(node);
     cleanup();
   }
 
-  overlay.addEventListener("click", (event) => {
-    if (event.target === overlay) {
-      cleanup();
+  function frameFromTimelineClick(event) {
+    const rect = timelineCanvas.getBoundingClientRect();
+    const x = clamp(event.clientX - rect.left, 0, rect.width);
+    const frameCount = getFrameCount();
+    if (!frameCount) return 0;
+    return Math.round((x / Math.max(1, rect.width - 1)) * Math.max(0, frameCount - 1));
+  }
+
+  timelineCanvas.addEventListener("click", (event) => {
+    const frame = frameFromTimelineClick(event);
+    const frameCount = getFrameCount();
+    if (!frameCount) return;
+
+    // Prefer selecting an existing cut when clicking near its center.
+    let bestIndex = -1;
+    let bestDist = Number.POSITIVE_INFINITY;
+    state.cuts.forEach((cut, idx) => {
+      const d = Math.abs(cutRange(cut).center - frame);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIndex = idx;
+      }
+    });
+    if (bestIndex >= 0 && bestDist <= Math.max(1, Math.round(frameCount * 0.02))) {
+      setSelectedCut(bestIndex);
     }
+    renderFrame(frame);
+  });
+
+  timelineCanvas.addEventListener("dblclick", (event) => {
+    const frame = frameFromTimelineClick(event);
+    state.currentFrame = frame;
+    addCutAtCurrent();
+    renderFrame(frame);
+  });
+
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) cleanup();
   });
 
   closeButton.addEventListener("click", cleanup);
   cancelButton.addEventListener("click", cleanup);
-  loadButton.addEventListener("click", () => {
-    loadVideo();
-  });
+  reloadButton.addEventListener("click", () => loadVideo());
 
   modal.querySelectorAll(".ll-step").forEach((button) => {
-    button.addEventListener("click", () => {
-      const step = Number(button.dataset.step || 0);
-      renderFrame(state.currentFrame + step);
-    });
+    button.addEventListener("click", () => renderFrame(state.currentFrame + Number(button.dataset.step || 0)));
+  });
+
+  modal.querySelector(".ll-add-cut")?.addEventListener("click", addCutAtCurrent);
+  modal.querySelector(".ll-delete-cut")?.addEventListener("click", deleteSelectedCut);
+  modal.querySelector(".ll-prev-cut")?.addEventListener("click", () => setSelectedCut(state.selectedCutIndex - 1));
+  modal.querySelector(".ll-next-cut")?.addEventListener("click", () => setSelectedCut(state.selectedCutIndex + 1));
+  modal.querySelector(".ll-jump-cut")?.addEventListener("click", () => {
+    if (state.selectedCutIndex < 0) return;
+    renderFrame(cutRange(state.cuts[state.selectedCutIndex]).center);
   });
 
   sliderEl.addEventListener("input", () => {
-    if (state.sliderTimer) {
-      clearTimeout(state.sliderTimer);
-    }
+    if (state.sliderTimer) clearTimeout(state.sliderTimer);
     const target = Number(sliderEl.value) || 0;
-    state.sliderTimer = setTimeout(() => {
-      renderFrame(target);
-    }, 40);
+    state.sliderTimer = setTimeout(() => renderFrame(target), 30);
+  });
+  frameInputEl.addEventListener("change", () => renderFrame(Number(frameInputEl.value) || 0));
+
+  [cutCenterEl, cutBufferEl, cutTransitionEl].forEach((el) => {
+    el.addEventListener("change", applySelectedCutInputs);
+    el.addEventListener("input", () => {
+      if (el === cutCenterEl || el === cutBufferEl || el === cutTransitionEl) {
+        applySelectedCutInputs();
+      }
+    });
   });
 
-  frameInputEl.addEventListener("change", () => {
-    renderFrame(Number(frameInputEl.value) || 0);
-  });
-
-  modal.querySelector(".ll-mark-start")?.addEventListener("click", () => {
-    state.pendingStart = state.currentFrame;
-    refreshPendingLabels();
-    setStatus(`Pending start set to ${state.pendingStart}`);
-  });
-
-  modal.querySelector(".ll-mark-end")?.addEventListener("click", () => {
-    state.pendingEnd = state.currentFrame;
-    refreshPendingLabels();
-    setStatus(`Pending end set to ${state.pendingEnd}`);
-  });
-
-  modal.querySelector(".ll-add-cut")?.addEventListener("click", () => addPendingCut(false));
-  modal.querySelector(".ll-add-single")?.addEventListener("click", () => addPendingCut(true));
-
-  modal.querySelector(".ll-clear")?.addEventListener("click", () => {
-    state.cuts = [];
-    renderCutRows();
-    updateSummary();
-  });
-
-  modal.querySelector(".ll-sort")?.addEventListener("click", () => {
-    sortCutsInPlace();
-    renderCutRows();
-    updateSummary();
+  [defaultBufferEl, defaultTransitionEl, defaultSourceEl, defaultOverlapEl].forEach((el) => {
+    el.addEventListener("change", () => {
+      syncDefaultsToWidgets();
+      markNodeDirty(node);
+    });
   });
 
   saveButton.addEventListener("click", () => {
@@ -910,40 +1043,31 @@ async function openLoopCutPlanner(node) {
       renderFrame(state.currentFrame + (event.shiftKey ? 10 : 1));
       return;
     }
-    if (event.key === "[") {
+    if (event.key.toLowerCase() === "c") {
       event.preventDefault();
-      state.pendingStart = state.currentFrame;
-      refreshPendingLabels();
-      setStatus(`Pending start set to ${state.pendingStart}`);
+      addCutAtCurrent();
       return;
     }
-    if (event.key === "]") {
-      event.preventDefault();
-      state.pendingEnd = state.currentFrame;
-      refreshPendingLabels();
-      setStatus(`Pending end set to ${state.pendingEnd}`);
-      return;
-    }
-    if (event.key.toLowerCase() === "a") {
-      event.preventDefault();
-      addPendingCut(false);
+    if (event.key === "Delete" || event.key === "Backspace") {
+      if (state.selectedCutIndex >= 0) {
+        event.preventDefault();
+        deleteSelectedCut();
+      }
     }
   };
   window.addEventListener("keydown", state.keyHandler);
 
-  refreshPendingLabels();
-  renderCutRows();
+  syncSourceLabel();
+  syncFrameControls();
+  setSelectedCut(state.selectedCutIndex);
   updateSummary();
 
   if (state.meta && Number(state.meta.frame_count) > 0) {
     state.currentFrame = clamp(state.currentFrame, 0, Number(state.meta.frame_count) - 1);
     syncFrameControls();
     renderFrame(state.currentFrame);
-  } else if (state.path) {
-    loadVideo();
   } else {
-    syncFrameControls();
-    setStatus("Load a video to start selecting cut ranges.");
+    loadVideo();
   }
 }
 
@@ -1025,6 +1149,10 @@ app.registerExtension({
 
         makeReadOnly(getWidget(this, "video_info_json"));
         hideWidget(getWidget(this, "video_info_json"));
+        hideWidget(getWidget(this, "video_path"));
+        hideWidget(getWidget(this, "default_transition_frames"));
+        hideWidget(getWidget(this, "default_source_frames"));
+        hideWidget(getWidget(this, "default_overlap_frames"));
         hideWidget(getWidget(this, "cuts_json"));
         hideWidget(getWidget(this, "ui_refresh"));
 

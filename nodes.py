@@ -288,12 +288,30 @@ def _normalize_cuts(
         if not isinstance(item, dict):
             raise ValueError(f"Cut #{idx + 1} must be an object")
 
-        start = _safe_int(item.get("start"), -1)
-        end = _safe_int(item.get("end"), -1)
-        if start < 0 or end < 0:
-            raise ValueError(f"Cut #{idx + 1} must have non-negative start/end")
-        if end < start:
-            raise ValueError(f"Cut #{idx + 1} end must be >= start")
+        center = item.get("center", item.get("cut_frame", item.get("frame")))
+        buffer_each_side = item.get(
+            "remove_buffer_each_side",
+            item.get("buffer_each_side", item.get("buffer")),
+        )
+
+        if center is not None and buffer_each_side is not None:
+            center = _safe_int(center, -1)
+            buffer_each_side = max(0, _safe_int(buffer_each_side, 0))
+            if center < 0:
+                raise ValueError(f"Cut #{idx + 1} must have a non-negative center frame")
+            start = center - buffer_each_side
+            end = center + buffer_each_side
+            if start < 0:
+                raise ValueError(f"Cut #{idx + 1} remove buffer extends before frame 0")
+        else:
+            start = _safe_int(item.get("start"), -1)
+            end = _safe_int(item.get("end"), -1)
+            if start < 0 or end < 0:
+                raise ValueError(f"Cut #{idx + 1} must have non-negative start/end")
+            if end < start:
+                raise ValueError(f"Cut #{idx + 1} end must be >= start")
+            center = (start + end) // 2
+            buffer_each_side = max(center - start, end - center)
 
         if frame_count is not None and frame_count > 0:
             if start >= frame_count or end >= frame_count:
@@ -311,6 +329,8 @@ def _normalize_cuts(
             {
                 "start": int(start),
                 "end": int(end),
+                "center": int(center),
+                "remove_buffer_each_side": int(buffer_each_side),
                 "transition_frames": int(transition_value),
                 "remove_frames": int(end - start + 1),
             }
@@ -650,28 +670,26 @@ class LostlessLoopCutTask:
     RETURN_TYPES = (
         "IMAGE",
         "IMAGE",
-        "IMAGE",
-        "IMAGE",
         "INT",
         "INT",
         "INT",
         "INT",
         "INT",
         "INT",
-        "STRING",
+        "INT",
+        "INT",
     )
     RETURN_NAMES = (
         "start_frame",
         "end_frame",
-        "pre_context",
-        "post_context",
         "remove_frames",
         "transition_frames",
         "source_frames",
         "overlap_frames",
+        "cut_center",
+        "remove_buffer_each_side",
         "cut_start",
         "cut_end",
-        "cut_json",
     )
     FUNCTION = "extract_cut"
     CATEGORY = "lostless/loop"
@@ -713,28 +731,20 @@ class LostlessLoopCutTask:
 
         start_frame = images[start : start + 1].contiguous()
         end_frame = images[end : end + 1].contiguous()
-        cut_payload = {
-            "cut_index": idx,
-            "start": start,
-            "end": end,
-            "remove_frames": int(end - start + 1),
-            "transition_frames": transition_frames,
-            "source_frames": source_frames,
-            "overlap_frames": overlap_frames,
-        }
+        center = _safe_int(cut.get("center"), (start + end) // 2)
+        remove_buffer_each_side = _safe_int(cut.get("remove_buffer_each_side"), max(center - start, end - center))
 
         return (
             start_frame,
             end_frame,
-            pre_context,
-            post_context,
             int(end - start + 1),
             int(transition_frames),
             int(source_frames),
             int(overlap_frames),
+            int(center),
+            int(remove_buffer_each_side),
             int(start),
             int(end),
-            json.dumps(cut_payload),
         )
 
 
