@@ -15,6 +15,11 @@ from aiohttp import web
 from server import PromptServer
 
 try:
+    import folder_paths  # type: ignore
+except Exception:
+    folder_paths = None
+
+try:
     import cv2  # type: ignore
 except Exception:
     cv2 = None
@@ -144,13 +149,43 @@ def _clamp_int(value: int, min_value: int, max_value: int) -> int:
     return max(min_value, min(max_value, int(value)))
 
 
+
+def _resolve_video_path_for_preview(video_path: str) -> str:
+    raw = str(video_path or "").strip()
+    if not raw:
+        return ""
+
+    expanded = _expand_path(raw)
+    if os.path.isfile(expanded):
+        return expanded
+
+    if folder_paths is not None:
+        try:
+            input_dir = getattr(folder_paths, "get_input_directory", lambda: "")()
+            if input_dir:
+                candidate = os.path.join(input_dir, raw)
+                if os.path.isfile(candidate):
+                    return os.path.abspath(candidate)
+        except Exception:
+            pass
+
+        try:
+            # Handles annotated names in some ComfyUI paths.
+            candidate = folder_paths.get_annotated_filepath(raw)
+            if candidate and os.path.isfile(candidate):
+                return os.path.abspath(candidate)
+        except Exception:
+            pass
+
+    return expanded
+
 def _load_video_meta(video_path: str) -> Dict[str, Any]:
     if cv2 is None:
         raise RuntimeError(
             "OpenCV (cv2) is required for Lostless loop cut video preview routes. Install opencv-python in the ComfyUI venv."
         )
 
-    path = _expand_path(video_path)
+    path = _resolve_video_path_for_preview(video_path)
     if not path or not os.path.isfile(path):
         raise FileNotFoundError(f"Video file not found: {path}")
 
@@ -801,6 +836,94 @@ class LostlessLoopApplyCutPlan:
         return (pruned, _plan_to_json(rebuilt_plan), json.dumps(meta, indent=2), int(pruned.shape[0]))
 
 
+
+class LostlessLoopCutter:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "video_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": False,
+                        "placeholder": "Optional if popup can infer from connected VHS_LoadVideo",
+                    },
+                ),
+                "default_transition_frames": ("INT", {"default": 12, "min": 0, "max": 9999}),
+                "default_source_frames": ("INT", {"default": 16, "min": 1, "max": 9999}),
+                "default_overlap_frames": ("INT", {"default": 8, "min": 0, "max": 9999}),
+                "cuts_json": (
+                    "STRING",
+                    {
+                        "default": "[]",
+                        "multiline": True,
+                        "placeholder": "Managed by popup selector",
+                    },
+                ),
+                "ui_refresh": ("INT", {"default": 0}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "LOSTLESS_CUT_PLAN")
+    RETURN_NAMES = ("images", "cut_plan")
+    FUNCTION = "cut"
+    CATEGORY = "lostless/loop"
+
+    def cut(
+        self,
+        images: torch.Tensor,
+        video_path: str,
+        default_transition_frames: int,
+        default_source_frames: int,
+        default_overlap_frames: int,
+        cuts_json: str,
+        ui_refresh: int,
+    ):
+        del ui_refresh
+        images = _ensure_image_batch(images)
+
+        frame_count = int(images.shape[0])
+        height = int(images.shape[1])
+        width = int(images.shape[2])
+        video_info: Dict[str, Any] = {
+            "path": str(video_path or ""),
+            "frame_count": frame_count,
+            "width": width,
+            "height": height,
+            "fps": 0.0,
+        }
+
+        if video_path:
+            try:
+                meta = _load_video_meta(video_path)
+                video_info.update({
+                    "path": str(meta.get("path", video_info["path"])),
+                    "fps": float(meta.get("fps", 0.0) or 0.0),
+                    "width": _safe_int(meta.get("width"), width) or width,
+                    "height": _safe_int(meta.get("height"), height) or height,
+                })
+            except Exception:
+                # Allow execution to continue if preview metadata cannot be loaded.
+                pass
+
+        plan = _build_loop_plan(
+            video_path=str(video_info.get("path", video_path or "")),
+            cuts_json=cuts_json,
+            video_info_json=json.dumps(video_info),
+            default_transition_frames=default_transition_frames,
+            default_source_frames=default_source_frames,
+            default_overlap_frames=default_overlap_frames,
+        )
+
+        pruned_images, normalized_plan_json, _schedule_json, _final_count = LostlessLoopApplyCutPlan().apply_plan(
+            images,
+            plan,
+        )
+        normalized_plan = json.loads(normalized_plan_json)
+        return (pruned_images, normalized_plan)
+
 def _register_routes() -> None:
     routes = PromptServer.instance.routes
 
@@ -893,6 +1016,7 @@ NODE_CLASS_MAPPINGS = {
     "LostlessRandomImage": LostlessRandomImage,
     "LostlessRandomizeButton": LostlessRandomizeButton,
     "LostlessBufferNode": LostlessBufferNode,
+    "LostlessLoopCutter": LostlessLoopCutter,
     "LostlessLoopCutPlanner": LostlessLoopCutPlanner,
     "LostlessLoopCutTask": LostlessLoopCutTask,
     "LostlessLoopApplyCutPlan": LostlessLoopApplyCutPlan,
@@ -902,6 +1026,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LostlessRandomImage": "Lostless Random Image",
     "LostlessRandomizeButton": "Lostless Randomize Button",
     "LostlessBufferNode": "Lostless Buffer",
+    "LostlessLoopCutter": "Lostless Loop Cutter",
     "LostlessLoopCutPlanner": "Lostless Loop Cut Planner",
     "LostlessLoopCutTask": "Lostless Loop Cut Task",
     "LostlessLoopApplyCutPlan": "Lostless Loop Apply Cut Plan",

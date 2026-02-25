@@ -4,6 +4,7 @@ import { api } from "../../../scripts/api.js";
 const RANDOM_IMAGE_NODE = "LostlessRandomImage";
 const RANDOMIZE_BUTTON_NODE = "LostlessRandomizeButton";
 const LOOP_CUT_PLANNER_NODE = "LostlessLoopCutPlanner";
+const LOOP_CUTTER_NODE = "LostlessLoopCutter";
 
 function getWidget(node, name) {
   return (node.widgets || []).find((widget) => widget.name === name);
@@ -39,6 +40,44 @@ function hideWidget(widget) {
     return;
   }
   widget.hidden = true;
+}
+
+function getConnectedInputNode(node, inputName) {
+  const graph = app.graph;
+  if (!graph) {
+    return null;
+  }
+  const input = (node.inputs || []).find((entry) => entry.name === inputName);
+  const linkId = input?.link;
+  if (!linkId) {
+    return null;
+  }
+  const link = graph.links?.[linkId];
+  if (!link) {
+    return null;
+  }
+  return graph.getNodeById?.(link.origin_id) || null;
+}
+
+function getConnectedVhsVideoPath(node) {
+  const upstream = getConnectedInputNode(node, "images");
+  if (!upstream || upstream.type !== "VHS_LoadVideo") {
+    return "";
+  }
+
+  const widgetsValues = upstream.widgets_values || {};
+  if (widgetsValues && typeof widgetsValues === "object" && !Array.isArray(widgetsValues)) {
+    const direct = widgetsValues.video || widgetsValues?.videopreview?.params?.filename;
+    if (typeof direct === "string" && direct.trim()) {
+      return direct.trim();
+    }
+  }
+
+  const widget = getWidget(upstream, "video");
+  if (typeof widget?.value === "string" && widget.value.trim()) {
+    return widget.value.trim();
+  }
+  return "";
 }
 
 function parseJsonSafe(value, fallback) {
@@ -394,13 +433,18 @@ async function openLoopCutPlanner(node) {
   const refreshWidget = getWidget(node, "ui_refresh");
   const defaultTransitionWidget = getWidget(node, "default_transition_frames");
 
-  if (!videoPathWidget || !cutsJsonWidget || !videoInfoWidget || !defaultTransitionWidget) {
+  if (!videoPathWidget || !cutsJsonWidget || !defaultTransitionWidget) {
     throw new Error("Loop planner widgets are missing.");
   }
 
+  const inferredVideoPath = getConnectedVhsVideoPath(node);
+  if ((!videoPathWidget.value || !String(videoPathWidget.value).trim()) && inferredVideoPath) {
+    setWidgetValue(videoPathWidget, inferredVideoPath, node);
+  }
+
   const state = {
-    path: String(videoPathWidget.value || ""),
-    meta: parseJsonSafe(String(videoInfoWidget.value || "{}"), {}),
+    path: String(videoPathWidget.value || inferredVideoPath || ""),
+    meta: parseJsonSafe(String(videoInfoWidget?.value || "{}"), {}),
     cuts: parseJsonSafe(String(cutsJsonWidget.value || "[]"), []),
     currentFrame: 0,
     pendingStart: null,
@@ -408,6 +452,11 @@ async function openLoopCutPlanner(node) {
     frameUrl: null,
     frameRequestId: 0,
     loadingFrame: false,
+    frameCache: new Map(),
+    frameCacheOrder: [],
+    maxCachedFrames: 80,
+    sliderTimer: null,
+    keyHandler: null,
   };
 
   if (!Array.isArray(state.cuts)) {
@@ -445,11 +494,11 @@ async function openLoopCutPlanner(node) {
           <div class="lostless-loop-status ll-status"></div>
           <div class="lostless-loop-row">
             <span class="lostless-loop-label">Frame</span>
-            <button class="lostless-loop-btn ll-step" data-step="-10">-10</button>
-            <button class="lostless-loop-btn ll-step" data-step="-1">-1</button>
+            <button class="lostless-loop-btn ll-step" data-step="-10">Prev 10</button>
+            <button class="lostless-loop-btn ll-step" data-step="-1">Prev</button>
             <input type="number" class="ll-frame-input" min="0" step="1" value="0" />
-            <button class="lostless-loop-btn ll-step" data-step="1">+1</button>
-            <button class="lostless-loop-btn ll-step" data-step="10">+10</button>
+            <button class="lostless-loop-btn ll-step" data-step="1">Next</button>
+            <button class="lostless-loop-btn ll-step" data-step="10">Next 10</button>
           </div>
           <div class="lostless-loop-row">
             <input type="range" class="ll-frame-slider" min="0" max="0" step="1" value="0" />
@@ -463,6 +512,7 @@ async function openLoopCutPlanner(node) {
           <div class="lostless-loop-row">
             <span class="lostless-loop-muted">Pending Start: <strong class="ll-pending-start">-</strong></span>
             <span class="lostless-loop-muted">Pending End: <strong class="ll-pending-end">-</strong></span>
+            <span class="lostless-loop-muted">Keys: Left/Right = frame, Shift+Left/Right = 10, [ = start, ] = end</span>
           </div>
         </div>
       </div>
@@ -518,6 +568,14 @@ async function openLoopCutPlanner(node) {
       URL.revokeObjectURL(state.frameUrl);
       state.frameUrl = null;
     }
+    if (state.sliderTimer) {
+      clearTimeout(state.sliderTimer);
+      state.sliderTimer = null;
+    }
+    if (state.keyHandler) {
+      window.removeEventListener("keydown", state.keyHandler);
+      state.keyHandler = null;
+    }
     overlay.remove();
   }
 
@@ -567,6 +625,39 @@ async function openLoopCutPlanner(node) {
     summaryEl.textContent = `${metaText} | cuts: ${state.cuts.length} | removed: ${totalRemoved} | final: ${finalCount}`;
   }
 
+  function cacheFrameBlob(frameIndex, blob) {
+    state.frameCache.set(frameIndex, blob);
+    state.frameCacheOrder = state.frameCacheOrder.filter((n) => n !== frameIndex);
+    state.frameCacheOrder.push(frameIndex);
+    while (state.frameCacheOrder.length > state.maxCachedFrames) {
+      const oldest = state.frameCacheOrder.shift();
+      if (oldest != null) {
+        state.frameCache.delete(oldest);
+      }
+    }
+  }
+
+  async function getCachedFrameBlob(frameIndex) {
+    if (state.frameCache.has(frameIndex)) {
+      return state.frameCache.get(frameIndex);
+    }
+    const blob = await fetchVideoFrameBlob(pathInput.value, frameIndex, 640);
+    cacheFrameBlob(frameIndex, blob);
+    return blob;
+  }
+
+  async function prefetchNeighborFrames(centerIndex) {
+    const frameCount = getFrameCount();
+    if (!frameCount) return;
+    const candidates = [centerIndex - 1, centerIndex + 1, centerIndex - 10, centerIndex + 10]
+      .map((n) => clamp(n, 0, frameCount - 1))
+      .filter((n, i, arr) => arr.indexOf(n) === i && !state.frameCache.has(n));
+
+    for (const idx of candidates.slice(0, 2)) {
+      getCachedFrameBlob(idx).catch(() => {});
+    }
+  }
+
   function renderCutRows() {
     cutListEl.innerHTML = "";
     state.cuts.forEach((cut, index) => {
@@ -610,7 +701,7 @@ async function openLoopCutPlanner(node) {
 
     const reqId = ++state.frameRequestId;
     try {
-      const blob = await fetchVideoFrameBlob(pathInput.value, state.currentFrame, 960);
+      const blob = await getCachedFrameBlob(state.currentFrame);
       if (reqId !== state.frameRequestId) {
         return;
       }
@@ -620,6 +711,7 @@ async function openLoopCutPlanner(node) {
       state.frameUrl = URL.createObjectURL(blob);
       previewImg.src = state.frameUrl;
       setStatus(`Frame ${state.currentFrame} / ${frameCount - 1}`);
+      prefetchNeighborFrames(state.currentFrame);
     } catch (error) {
       if (reqId !== state.frameRequestId) {
         return;
@@ -722,7 +814,9 @@ async function openLoopCutPlanner(node) {
 
     setWidgetValue(videoPathWidget, videoInfo.path, node);
     setWidgetValue(cutsJsonWidget, JSON.stringify(normalizedCuts, null, 2), node);
-    setWidgetValue(videoInfoWidget, JSON.stringify(videoInfo), node);
+    if (videoInfoWidget) {
+      setWidgetValue(videoInfoWidget, JSON.stringify(videoInfo), node);
+    }
 
     if (refreshWidget) {
       const nextValue = (Number(refreshWidget.value) || 0) + 1;
@@ -753,7 +847,13 @@ async function openLoopCutPlanner(node) {
   });
 
   sliderEl.addEventListener("input", () => {
-    renderFrame(Number(sliderEl.value) || 0);
+    if (state.sliderTimer) {
+      clearTimeout(state.sliderTimer);
+    }
+    const target = Number(sliderEl.value) || 0;
+    state.sliderTimer = setTimeout(() => {
+      renderFrame(target);
+    }, 40);
   });
 
   frameInputEl.addEventListener("change", () => {
@@ -794,6 +894,42 @@ async function openLoopCutPlanner(node) {
       setStatus(error?.message || String(error));
     }
   });
+
+  state.keyHandler = (event) => {
+    if (!overlay.isConnected) return;
+    const tag = event.target?.tagName?.toLowerCase?.() || "";
+    if (tag === "input" || tag === "textarea") return;
+
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      renderFrame(state.currentFrame + (event.shiftKey ? -10 : -1));
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      renderFrame(state.currentFrame + (event.shiftKey ? 10 : 1));
+      return;
+    }
+    if (event.key === "[") {
+      event.preventDefault();
+      state.pendingStart = state.currentFrame;
+      refreshPendingLabels();
+      setStatus(`Pending start set to ${state.pendingStart}`);
+      return;
+    }
+    if (event.key === "]") {
+      event.preventDefault();
+      state.pendingEnd = state.currentFrame;
+      refreshPendingLabels();
+      setStatus(`Pending end set to ${state.pendingEnd}`);
+      return;
+    }
+    if (event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      addPendingCut(false);
+    }
+  };
+  window.addEventListener("keydown", state.keyHandler);
 
   refreshPendingLabels();
   renderCutRows();
@@ -878,7 +1014,7 @@ app.registerExtension({
       };
     }
 
-    if (nodeData.name === LOOP_CUT_PLANNER_NODE) {
+    if (nodeData.name === LOOP_CUT_PLANNER_NODE || nodeData.name === LOOP_CUTTER_NODE) {
       const onNodeCreated = nodeType.prototype.onNodeCreated;
       nodeType.prototype.onNodeCreated = function () {
         const result = onNodeCreated?.apply(this, arguments);
@@ -888,11 +1024,13 @@ app.registerExtension({
         this.__lostless_loop_planner_ready = true;
 
         makeReadOnly(getWidget(this, "video_info_json"));
+        hideWidget(getWidget(this, "video_info_json"));
+        hideWidget(getWidget(this, "cuts_json"));
         hideWidget(getWidget(this, "ui_refresh"));
 
         this.addWidget(
           "button",
-          "Select Loop Cuts",
+          nodeData.name === LOOP_CUTTER_NODE ? "Select Frames To Remove" : "Select Loop Cuts",
           "",
           async () => {
             try {
@@ -909,3 +1047,4 @@ app.registerExtension({
     }
   },
 });
+
