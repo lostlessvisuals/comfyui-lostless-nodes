@@ -19,7 +19,7 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSettings, QRect, QRectF, QTim
 from PyQt5.QtGui import QFont, QPainter, QColor, QPen, QBrush, QPixmap, QImage, QLinearGradient, QRadialGradient, QPainterPath, QCursor, QIcon
 import cv2
 import numpy as np
-from collections import deque
+from collections import deque, OrderedDict
 import time
 
 MASK_EDITOR_BUILD_TAG = "r2026.02.20.3"
@@ -1818,7 +1818,7 @@ class InpaintingMaskEditor(QDialog):
     def clear_current_frame(self):
         """Clear the mask for current frame"""
         # Save undo state before clearing
-        self.mask_widget.save_undo_state("Clear frame")
+        self.mask_widget.save_undo_state("Clear frame", affected_frames=[self.current_frame_index])
         
         if self.drawing_mode in ["shape", "liquify"]:
             # In shape mode, remove the keyframe entirely so interpolation takes over
@@ -1855,7 +1855,7 @@ class InpaintingMaskEditor(QDialog):
     def fill_current_frame(self):
         """Fill the mask for current frame"""
         # Save undo state before filling
-        self.mask_widget.save_undo_state("Fill frame")
+        self.mask_widget.save_undo_state("Fill frame", affected_frames=[self.current_frame_index])
         
         if self.drawing_mode == "shape":
             # In shape mode, create a shape that covers the entire frame
@@ -1900,7 +1900,7 @@ class InpaintingMaskEditor(QDialog):
             return
         
         # Save undo state before clearing
-        self.mask_widget.save_undo_state("Clear all frames")
+        self.mask_widget.save_undo_state("Clear all frames", full_snapshot=True)
         
         # Clear any active liquify deformation first
         if self.drawing_mode == "liquify":
@@ -2117,7 +2117,7 @@ class InpaintingMaskEditor(QDialog):
             QMessageBox.information(self, "No Bridges Added", "No valid floating-mask connections were created.")
             return
 
-        self.mask_widget.save_undo_state("Connect floating masks")
+        self.mask_widget.save_undo_state("Connect floating masks", affected_frames=[self.current_frame_index])
         self.mask_widget.shape_keyframes[self.current_frame_index].extend(bridges)
         merged_shape_count = self._merge_connected_shapes_for_frame(self.current_frame_index)
         self.mask_widget.invalidate_shape_cache()
@@ -2151,7 +2151,7 @@ class InpaintingMaskEditor(QDialog):
             QMessageBox.information(self, "No Eligible Frames", "No frames contain at least two shapes to connect.")
             return
 
-        self.mask_widget.save_undo_state("Connect floating masks (all frames)")
+        self.mask_widget.save_undo_state("Connect floating masks (all frames)", full_snapshot=True)
 
         total_bridges = 0
         total_skipped_far = 0
@@ -3201,7 +3201,7 @@ class InpaintingMaskEditor(QDialog):
             QMessageBox.information(self, "No Shapes", "No shape keyframes are available.")
             return
 
-        self.mask_widget.save_undo_state("Keep largest mask (all keyframes)")
+        self.mask_widget.save_undo_state("Keep largest mask (all keyframes)", full_snapshot=True)
 
         frames_modified = 0
         removed_shapes = 0
@@ -3284,7 +3284,7 @@ class InpaintingMaskEditor(QDialog):
             QMessageBox.information(self, "No Changes", "Could not determine a valid largest mask on this frame.")
             return
 
-        self.mask_widget.save_undo_state("Keep largest mask (current frame)")
+        self.mask_widget.save_undo_state("Keep largest mask (current frame)", affected_frames=[self.current_frame_index])
         removed_count = max(0, len(shapes) - 1)
         self.mask_widget.shape_keyframes[self.current_frame_index] = [largest_shape]
         self.mask_widget.invalidate_shape_cache()
@@ -3401,8 +3401,11 @@ class MaskDrawingWidget(QWidget):
         self._initializing = False
         
         # Shape interpolation cache to avoid recalculation
-        self._shape_cache = {}  # (frame, cache_key) -> interpolated shapes
+        self._shape_cache = OrderedDict()  # (frame, cache_key) -> interpolated shapes
+        self._shape_cache_max_entries = 96
         self._cache_key = 0  # Incremented when keyframes change
+        self._sorted_keyframes_cache = ()
+        self._sorted_keyframes_cache_key = -1
         
     def set_mask(self, mask, video_frame):
         """Set the mask to edit"""
@@ -3453,9 +3456,35 @@ class MaskDrawingWidget(QWidget):
         """Invalidate the shape interpolation cache"""
         self._cache_key += 1
         self._shape_cache.clear()  # Clear old cache entries
+        self._sorted_keyframes_cache = ()
+        self._sorted_keyframes_cache_key = -1
         # Limit cache size to prevent memory issues
         if self._cache_key > 1000000:
             self._cache_key = 0
+    
+    def _get_sorted_keyframes(self):
+        """Return sorted keyframe indices cached per cache generation."""
+        if self._sorted_keyframes_cache_key != self._cache_key:
+            self._sorted_keyframes_cache = tuple(sorted(self.shape_keyframes.keys()))
+            self._sorted_keyframes_cache_key = self._cache_key
+        return self._sorted_keyframes_cache
+    
+    def _shape_cache_get(self, cache_key):
+        cached = self._shape_cache.get(cache_key)
+        if cached is not None:
+            self._shape_cache.move_to_end(cache_key)
+        return cached
+    
+    def _shape_cache_set(self, cache_key, value):
+        self._shape_cache[cache_key] = value
+        self._shape_cache.move_to_end(cache_key)
+        max_entries = self._shape_cache_max_entries
+        if self.parent_editor and hasattr(self.parent_editor, "video_frames"):
+            frame_count = len(self.parent_editor.video_frames)
+            # Keep enough warm entries for timeline scrubbing without unbounded growth.
+            max_entries = max(32, min(120, max_entries, frame_count // 2))
+        while len(self._shape_cache) > max_entries:
+            self._shape_cache.popitem(last=False)
         
     def set_drawing_mode(self, mode):
         import logging
@@ -4431,18 +4460,19 @@ class MaskDrawingWidget(QWidget):
         # Include spline mode in cache key to prevent conflicts between spline and linear interpolation
         spline_enabled = bool(getattr(self.parent_editor, 'enable_smooth_interpolation', True))
         cache_key = (frame, self._cache_key, spline_enabled)
-        if cache_key in self._shape_cache:
-            return self._shape_cache[cache_key]
+        cached = self._shape_cache_get(cache_key)
+        if cached is not None:
+            return cached
         
         # If it's a keyframe, return the shapes as-is (don't re-normalize)
         if frame in self.shape_keyframes:
             # Return deep copies to avoid modifying originals
             shapes = [shape.copy() for shape in self.shape_keyframes[frame]]
-            self._shape_cache[cache_key] = shapes
+            self._shape_cache_set(cache_key, shapes)
             return shapes
             
         # Find surrounding keyframes
-        keyframes = sorted(self.shape_keyframes.keys())
+        keyframes = self._get_sorted_keyframes()
         if not keyframes:
             return []
             
@@ -4491,7 +4521,7 @@ class MaskDrawingWidget(QWidget):
                 shapes = [shape.copy() for shape in self.shape_keyframes[next_frame]]
         
         # Cache the result
-        self._shape_cache[cache_key] = shapes
+        self._shape_cache_set(cache_key, shapes)
         return shapes
     
     def interpolate_shapes(self, shapes1, shapes2, t):
@@ -7411,27 +7441,66 @@ class MaskDrawingWidget(QWidget):
         # Return the temporarily deformed shapes without modifying keyframes
         return self._temp_deformed_shapes.copy() if hasattr(self, '_temp_deformed_shapes') else []
     
-    def save_undo_state(self, description=""):
-        """Save current state to undo stack"""
+    def _clone_shape(self, shape):
+        return {
+            'vertices': [list(v) for v in shape.get('vertices', [])],
+            'vertex_count': shape.get('vertex_count', len(shape.get('vertices', []))),
+            'filled': shape.get('filled', True),
+            'visible': shape.get('visible', True),
+            'closed': shape.get('closed', True),
+            'is_shape': shape.get('is_shape', True),
+        }
+    
+    def _normalize_affected_frames(self, affected_frames):
+        if affected_frames is None:
+            frame = self.parent_editor.current_frame_index if self.parent_editor else 0
+            return [int(frame)]
+        normalized = []
+        seen = set()
+        for frame in affected_frames:
+            try:
+                frame_i = int(frame)
+            except Exception:
+                continue
+            if frame_i in seen:
+                continue
+            seen.add(frame_i)
+            normalized.append(frame_i)
+        normalized.sort()
+        return normalized
+    
+    def _capture_state(self, description="", full_snapshot=False, affected_frames=None):
+        """Capture undo/redo state with either full or scoped keyframe snapshots."""
         state = {
             'mask': self.mask.copy() if self.mask is not None else None,
             'shape_keyframes': {},
             'description': description,
-            'frame': self.parent_editor.current_frame_index if self.parent_editor else 0
+            'frame': self.parent_editor.current_frame_index if self.parent_editor else 0,
+            'full_snapshot': bool(full_snapshot),
+            'affected_frames': None,
         }
         
-        # Deep copy shape keyframes
-        for frame, shapes in self.shape_keyframes.items():
-            state['shape_keyframes'][frame] = []
-            for shape in shapes:
-                state['shape_keyframes'][frame].append({
-                    'vertices': [list(v) for v in shape['vertices']],
-                    'vertex_count': shape.get('vertex_count', len(shape['vertices'])),
-                    'filled': shape.get('filled', True),
-                    'visible': shape.get('visible', True),
-                    'closed': shape.get('closed', True),
-                    'is_shape': shape.get('is_shape', True)
-                })
+        if full_snapshot:
+            for frame, shapes in self.shape_keyframes.items():
+                state['shape_keyframes'][frame] = [self._clone_shape(shape) for shape in shapes]
+            return state
+        
+        frames = self._normalize_affected_frames(affected_frames)
+        state['affected_frames'] = frames
+        for frame in frames:
+            if frame in self.shape_keyframes:
+                state['shape_keyframes'][frame] = [self._clone_shape(shape) for shape in self.shape_keyframes[frame]]
+            else:
+                state['shape_keyframes'][frame] = None
+        return state
+    
+    def save_undo_state(self, description="", full_snapshot=False, affected_frames=None):
+        """Save current state to undo stack."""
+        state = self._capture_state(
+            description=description,
+            full_snapshot=full_snapshot,
+            affected_frames=affected_frames,
+        )
         
         # Add to undo stack
         self.undo_stack.append(state)
@@ -7451,31 +7520,18 @@ class MaskDrawingWidget(QWidget):
         """Undo last action"""
         if not self.undo_stack:
             return False
+        
+        state = self.undo_stack.pop()
             
         # Save current state to redo stack
-        current_state = {
-            'mask': self.mask.copy() if self.mask is not None else None,
-            'shape_keyframes': {},
-            'frame': self.parent_editor.current_frame_index if self.parent_editor else 0
-        }
-        
-        # Deep copy current shape keyframes
-        for frame, shapes in self.shape_keyframes.items():
-            current_state['shape_keyframes'][frame] = []
-            for shape in shapes:
-                current_state['shape_keyframes'][frame].append({
-                    'vertices': [list(v) for v in shape['vertices']],
-                    'vertex_count': shape.get('vertex_count', len(shape['vertices'])),
-                    'filled': shape.get('filled', True),
-                    'visible': shape.get('visible', True),
-                    'closed': shape.get('closed', True),
-                    'is_shape': shape.get('is_shape', True)
-                })
+        current_state = self._capture_state(
+            full_snapshot=bool(state.get('full_snapshot', True)),
+            affected_frames=state.get('affected_frames'),
+        )
         
         self.redo_stack.append(current_state)
         
         # Restore previous state
-        state = self.undo_stack.pop()
         self.restore_state(state)
         return True
     
@@ -7483,12 +7539,20 @@ class MaskDrawingWidget(QWidget):
         """Redo previously undone action"""
         if not self.redo_stack:
             return False
+        
+        state = self.redo_stack.pop()
             
-        # Save current state to undo stack
-        self.save_undo_state("Before redo")
+        # Save current state to undo stack using the same snapshot scope.
+        current_state = self._capture_state(
+            description="Before redo",
+            full_snapshot=bool(state.get('full_snapshot', True)),
+            affected_frames=state.get('affected_frames'),
+        )
+        self.undo_stack.append(current_state)
+        if len(self.undo_stack) > self.max_undo_steps:
+            self.undo_stack.pop(0)
         
         # Restore redo state
-        state = self.redo_stack.pop()
         self.restore_state(state)
         return True
     
@@ -7498,19 +7562,18 @@ class MaskDrawingWidget(QWidget):
         if state['mask'] is not None:
             self.mask = state['mask'].copy()
         
-        # Restore shape keyframes
-        self.shape_keyframes.clear()
-        for frame, shapes in state['shape_keyframes'].items():
-            self.shape_keyframes[frame] = []
-            for shape in shapes:
-                self.shape_keyframes[frame].append({
-                    'vertices': [list(v) for v in shape['vertices']],
-                    'vertex_count': shape.get('vertex_count', len(shape['vertices'])),
-                    'filled': shape.get('filled', True),
-                    'visible': shape.get('visible', True),
-                    'closed': shape.get('closed', True),
-                    'is_shape': shape.get('is_shape', True)
-                })
+        if state.get('full_snapshot', True):
+            # Restore complete shape keyframe state.
+            self.shape_keyframes.clear()
+            for frame, shapes in state['shape_keyframes'].items():
+                self.shape_keyframes[frame] = [self._clone_shape(shape) for shape in shapes]
+        else:
+            # Restore only the affected frames for fast local undo/redo.
+            for frame in state.get('affected_frames') or []:
+                if frame not in state['shape_keyframes'] or state['shape_keyframes'][frame] is None:
+                    self.shape_keyframes.pop(frame, None)
+                else:
+                    self.shape_keyframes[frame] = [self._clone_shape(shape) for shape in state['shape_keyframes'][frame]]
         
         # Clear interpolation cache
         self.invalidate_shape_cache()

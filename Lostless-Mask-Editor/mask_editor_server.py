@@ -82,6 +82,7 @@ async def launch_mask_editor(request):
         
         # Initialize session variables
         session_data_str = None
+        session_data_obj = None
         session_output_dir = None
         
         # Check if we have an existing output dir from the client
@@ -94,6 +95,7 @@ async def launch_mask_editor(request):
             try:
                 session_data = load_session_data(output_dir)
                 if session_data:
+                    session_data_obj = session_data
                     session_data_str = json.dumps(session_data)
                     print(f"[Mask Editor] Loaded session data from existing output dir")
                     # Update active_editors
@@ -109,6 +111,11 @@ async def launch_mask_editor(request):
             # Check if we have session data for this node in memory
             session_data_str = active_editors.get(f"{node_id}_session_data", None)
             session_output_dir = active_editors.get(f"{node_id}_output_dir", None)
+            if session_data_str:
+                try:
+                    session_data_obj = json.loads(session_data_str)
+                except Exception:
+                    session_data_obj = None
         
         print(f"[Mask Editor] Checking for session data for node {node_id}")
         print(f"[Mask Editor] session_data_str exists: {bool(session_data_str)}")
@@ -123,6 +130,7 @@ async def launch_mask_editor(request):
             if not session_data_str:
                 session_data = load_session_data(output_dir)
                 if session_data:
+                    session_data_obj = session_data
                     session_data_str = json.dumps(session_data)
                     print(f"[Mask Editor] Loaded session data from file")
                     # Print the video_info to debug
@@ -160,6 +168,7 @@ async def launch_mask_editor(request):
                         # Load session data
                         session_data = load_session_data(output_dir)
                         if session_data:
+                            session_data_obj = session_data
                             session_data_str = json.dumps(session_data)
                             print(f"[Mask Editor] Loaded session data from persistent session")
                             
@@ -173,21 +182,22 @@ async def launch_mask_editor(request):
         config = {
             "input_frames": input_frames,
             "output_dir": output_dir,
-            "project_data": session_data_str if session_data_str else ""  # Use session data if available
+            # Keep structured JSON to avoid expensive double encode/decode.
+            "project_data": session_data_obj if session_data_obj is not None else ""
         }
         
         print(f"[Mask Editor] Config being sent:")
         print(f"[Mask Editor]   - output_dir: {output_dir}")
         print(f"[Mask Editor]   - has project_data: {bool(session_data_str)}")
-        if session_data_str:
-            print(f"[Mask Editor]   - project_data length: {len(session_data_str)}")
-            # Try to parse and check for video_info
+        if session_data_obj is not None:
             try:
-                data = json.loads(session_data_str)
-                if "video_info" in data:
-                    print(f"[Mask Editor]   - video_info found: {data['video_info']}")
-            except:
-                pass
+                session_data_len = len(json.dumps(session_data_obj))
+            except Exception:
+                session_data_len = -1
+            if session_data_len >= 0:
+                print(f"[Mask Editor]   - project_data length: {session_data_len}")
+            if "video_info" in session_data_obj:
+                print(f"[Mask Editor]   - video_info found: {session_data_obj['video_info']}")
         
         # Write config
         with open(config_path, 'w') as f:

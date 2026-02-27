@@ -71,7 +71,8 @@ class MaskEditor:
                     "STRING",
                     {
                         "default": "",
-                        "multiline": True,
+                        "multiline": False,
+                        "forceInput": True,
                     },
                 ),
             }
@@ -375,7 +376,8 @@ class MaskEditor:
         config = {
             "input_frames": [],
             "output_dir": output_dir,
-            "project_data": json.dumps(project_data),
+            # Keep structured JSON to avoid expensive double encode/decode on large projects.
+            "project_data": project_data,
             "comfy_strict_mode": True,
         }
         config_path = os.path.join(temp_dir, "config.json")
