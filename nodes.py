@@ -115,6 +115,31 @@ def _list_image_files(folder_path: str, recursive: bool, extensions: Set[str]) -
     return found
 
 
+def _resolve_selected_image_path(
+    folder_path: str,
+    recursive: bool,
+    extensions: Set[str],
+    selected_path: str,
+    selected_filename: str = "",
+    images: Optional[List[str]] = None,
+) -> str:
+    chosen = _expand_path(selected_path) if selected_path else ""
+    if chosen and os.path.isfile(chosen) and _is_image_file(chosen, extensions):
+        return chosen
+
+    image_list = images if images is not None else _list_image_files(folder_path, recursive, extensions)
+    if not image_list:
+        return ""
+
+    wanted_name = os.path.basename(str(selected_filename or "").strip())
+    if wanted_name:
+        for image_path in image_list:
+            if os.path.basename(image_path) == wanted_name:
+                return image_path
+
+    return image_list[0]
+
+
 def _load_image_tensor(image_path: str) -> torch.Tensor:
     image = Image.open(image_path)
     image = ImageOps.exif_transpose(image)
@@ -525,7 +550,6 @@ class LostlessRandomImage:
         trigger: int,
         selected_path: str,
     ):
-        del selected_filename
         del trigger
 
         extensions = _normalize_extensions(allowed_extensions)
@@ -536,8 +560,15 @@ class LostlessRandomImage:
                 f"No images found in '{_expand_path(folder_path)}' with extensions: {sorted(extensions)}"
             )
 
-        chosen = _expand_path(selected_path) if selected_path else ""
-        if not chosen or not os.path.isfile(chosen) or not _is_image_file(chosen, extensions):
+        chosen = _resolve_selected_image_path(
+            folder_path=folder_path,
+            recursive=recursive,
+            extensions=extensions,
+            selected_path=selected_path,
+            selected_filename=selected_filename,
+            images=images,
+        )
+        if not chosen:
             chosen = images[0]
 
         image_tensor = _load_image_tensor(chosen)
@@ -988,6 +1019,108 @@ def _register_routes() -> None:
             buf = BytesIO()
             image.save(buf, format="PNG")
             return web.Response(body=buf.getvalue(), content_type="image/png")
+
+    @routes.post("/lostless/resolve-image")
+    async def lostless_resolve_image(request):
+        payload = await request.json()
+
+        folder_path = str(payload.get("folder_path", ""))
+        recursive = bool(payload.get("recursive", True))
+        allowed_extensions = str(payload.get("allowed_extensions", DEFAULT_EXTENSIONS))
+        selected_path = str(payload.get("selected_path", ""))
+        selected_filename = str(payload.get("selected_filename", ""))
+
+        extensions = _normalize_extensions(allowed_extensions)
+        images = _list_image_files(folder_path, recursive, extensions)
+        chosen = _resolve_selected_image_path(
+            folder_path=folder_path,
+            recursive=recursive,
+            extensions=extensions,
+            selected_path=selected_path,
+            selected_filename=selected_filename,
+            images=images,
+        )
+
+        if not chosen:
+            return web.json_response(
+                {
+                    "ok": False,
+                    "error": "No matching image could be resolved from the saved selection.",
+                },
+                status=404,
+            )
+
+        return web.json_response(
+            {
+                "ok": True,
+                "path": chosen,
+                "filename": os.path.basename(chosen),
+                "count": len(images),
+            }
+        )
+
+    @routes.post("/lostless/select-image")
+    async def lostless_select_image(request):
+        try:
+            payload = await request.json()
+            folder_path = str(payload.get("folder_path", ""))
+            selected_path = str(payload.get("selected_path", ""))
+            allowed_extensions = str(payload.get("allowed_extensions", DEFAULT_EXTENSIONS))
+            extensions = _normalize_extensions(allowed_extensions)
+
+            import tkinter as tk
+            from tkinter import filedialog
+
+            initial_dir = ""
+            if selected_path:
+                initial_dir = os.path.dirname(_expand_path(selected_path))
+            if not initial_dir:
+                candidate = _expand_path(folder_path) if folder_path else ""
+                if os.path.isdir(candidate):
+                    initial_dir = candidate
+
+            patterns = " ".join(f"*{ext}" for ext in sorted(extensions))
+            filetypes = [("Image files", patterns)] if patterns else []
+            filetypes.append(("All files", "*.*"))
+
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                root.attributes("-topmost", True)
+            except Exception:
+                pass
+
+            try:
+                chosen = filedialog.askopenfilename(
+                    title="Select image for Lostless Random Image",
+                    initialdir=initial_dir or "",
+                    filetypes=filetypes,
+                )
+            finally:
+                root.destroy()
+
+            if not chosen:
+                return web.json_response({"ok": True, "cancelled": True})
+
+            chosen = _expand_path(chosen)
+            if not os.path.isfile(chosen):
+                return web.json_response({"ok": False, "error": "Selected image file was not found."}, status=404)
+            if not _is_image_file(chosen, extensions):
+                return web.json_response(
+                    {"ok": False, "error": "Selected file does not match the allowed extensions."},
+                    status=400,
+                )
+
+            return web.json_response(
+                {
+                    "ok": True,
+                    "cancelled": False,
+                    "path": chosen,
+                    "filename": os.path.basename(chosen),
+                }
+            )
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
 
     @routes.post("/lostless/video-meta")
     async def lostless_video_meta(request):

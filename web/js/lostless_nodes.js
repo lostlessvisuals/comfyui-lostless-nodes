@@ -144,6 +144,48 @@ async function fetchPreviewBlob(path) {
   return await response.blob();
 }
 
+async function resolveImageSelection(node) {
+  const folderPath = getWidget(node, "folder_path")?.value || "";
+  const recursive = !!getWidget(node, "recursive")?.value;
+  const allowedExtensions = getWidget(node, "allowed_extensions")?.value || "";
+  const selectedPath = getWidget(node, "selected_path")?.value || "";
+  const selectedFilename = getWidget(node, "selected_filename")?.value || "";
+
+  const { data } = await postJson("/lostless/resolve-image", {
+    folder_path: folderPath,
+    recursive,
+    allowed_extensions: allowedExtensions,
+    selected_path: selectedPath,
+    selected_filename: selectedFilename,
+  });
+
+  return {
+    path: data.path,
+    filename: data.filename,
+  };
+}
+
+async function openImagePicker(node) {
+  const folderPath = getWidget(node, "folder_path")?.value || "";
+  const allowedExtensions = getWidget(node, "allowed_extensions")?.value || "";
+  const selectedPath = getWidget(node, "selected_path")?.value || "";
+
+  const { data } = await postJson("/lostless/select-image", {
+    folder_path: folderPath,
+    allowed_extensions: allowedExtensions,
+    selected_path: selectedPath,
+  });
+
+  if (data.cancelled) {
+    return null;
+  }
+
+  return {
+    path: data.path,
+    filename: data.filename,
+  };
+}
+
 async function fetchVideoMeta(path) {
   const { data } = await postJson("/lostless/video-meta", { path });
   return data;
@@ -196,6 +238,50 @@ function applyPreview(node, blob) {
   };
 }
 
+async function restoreImageNodePreview(node, force = false) {
+  if (node.__lostlessPreviewRestoreInFlight) {
+    return node.__lostlessPreviewRestoreInFlight;
+  }
+
+  const selectedPathWidget = getWidget(node, "selected_path");
+  const selectedFilenameWidget = getWidget(node, "selected_filename");
+  const currentPath = selectedPathWidget?.value || "";
+  const currentFilename = selectedFilenameWidget?.value || "";
+  if (!force && !currentPath && !currentFilename) {
+    return;
+  }
+
+  const task = (async () => {
+    try {
+      const resolved = await resolveImageSelection(node);
+      if (!resolved?.path) {
+        return;
+      }
+
+      if (!force && node.__lostlessPreviewSourcePath === resolved.path && Array.isArray(node.imgs) && node.imgs.length > 0) {
+        return;
+      }
+
+      setWidgetValue(selectedFilenameWidget, resolved.filename, node);
+      setWidgetValue(selectedPathWidget, resolved.path, node);
+
+      const previewBlob = await fetchPreviewBlob(resolved.path);
+      applyPreview(node, previewBlob);
+      node.__lostlessPreviewSourcePath = resolved.path;
+      markNodeDirty(node);
+    } catch (error) {
+      console.warn("Lostless preview restore skipped:", error);
+    }
+  })();
+
+  node.__lostlessPreviewRestoreInFlight = task;
+  try {
+    await task;
+  } finally {
+    node.__lostlessPreviewRestoreInFlight = null;
+  }
+}
+
 async function randomizeImageNode(node) {
   const selectedFilenameWidget = getWidget(node, "selected_filename");
   const selectedPathWidget = getWidget(node, "selected_path");
@@ -209,6 +295,7 @@ async function randomizeImageNode(node) {
 
   const previewBlob = await fetchPreviewBlob(selected.path);
   applyPreview(node, previewBlob);
+  node.__lostlessPreviewSourcePath = selected.path;
   markNodeDirty(node);
 }
 
@@ -1076,6 +1163,7 @@ app.registerExtension({
   async beforeRegisterNodeDef(nodeType, nodeData) {
     if (nodeData.name === RANDOM_IMAGE_NODE) {
       const onNodeCreated = nodeType.prototype.onNodeCreated;
+      const onConfigure = nodeType.prototype.onConfigure;
       nodeType.prototype.onNodeCreated = function () {
         const result = onNodeCreated?.apply(this, arguments);
         if (this.__lostless_random_image_ready) {
@@ -1088,6 +1176,10 @@ app.registerExtension({
 
         this.lostlessRandomize = async () => {
           await randomizeImageNode(this);
+        };
+
+        this.lostlessRestorePreview = async (force = false) => {
+          await restoreImageNodePreview(this, force);
         };
 
         this.addWidget(
@@ -1104,6 +1196,45 @@ app.registerExtension({
           { serialize: false }
         );
 
+        this.addWidget(
+          "button",
+          "Load Image",
+          "",
+          async () => {
+            try {
+              const selected = await openImagePicker(this);
+              if (!selected) {
+                return;
+              }
+
+              const selectedFilenameWidget = getWidget(this, "selected_filename");
+              const selectedPathWidget = getWidget(this, "selected_path");
+              setWidgetValue(selectedFilenameWidget, selected.filename, this);
+              setWidgetValue(selectedPathWidget, selected.path, this);
+
+              const previewBlob = await fetchPreviewBlob(selected.path);
+              applyPreview(this, previewBlob);
+              this.__lostlessPreviewSourcePath = selected.path;
+              markNodeDirty(this);
+            } catch (error) {
+              console.error("Lostless load image error:", error);
+            }
+          },
+          { serialize: false }
+        );
+
+        setTimeout(() => {
+          this.lostlessRestorePreview?.();
+        }, 0);
+
+        return result;
+      };
+
+      nodeType.prototype.onConfigure = function () {
+        const result = onConfigure?.apply(this, arguments);
+        setTimeout(() => {
+          this.lostlessRestorePreview?.();
+        }, 0);
         return result;
       };
     }
