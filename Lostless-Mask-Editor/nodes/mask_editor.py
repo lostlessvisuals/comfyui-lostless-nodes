@@ -836,9 +836,8 @@ class InpaintingMaskEditor(QDialog):
         self.vertex_count_slider = QSlider(Qt.Horizontal)
         self.vertex_count_slider.setRange(8, 512)  # 8 to 512 vertices
         # Load saved vertex count or use default
-        initial_vertex_count = 150
+        initial_vertex_count = self.settings.value('mask_editor_vertex_count', 150, type=int)
         self.vertex_count_slider.setValue(initial_vertex_count)
-        self.settings.setValue('mask_editor_vertex_count', initial_vertex_count)
         self.vertex_count_slider.setMinimumWidth(100)
         self.vertex_count_slider.setMaximumWidth(150)
         self.vertex_count_slider.valueChanged.connect(self.on_vertex_count_changed)
@@ -946,6 +945,20 @@ class InpaintingMaskEditor(QDialog):
                 background-color: #7a5d5d;
             }
         """
+        edge_button_style = """
+            QPushButton {
+                background-color: #4c6654;
+                color: #ffffff;
+                font-weight: 600;
+                font-size: 12px;
+                border: 1px solid #6f8b77;
+                border-radius: 4px;
+                padding: 3px 8px;
+            }
+            QPushButton:hover {
+                background-color: #597861;
+            }
+        """
         section_label_style = """
             QLabel {
                 color: #cfcfcf;
@@ -1031,6 +1044,33 @@ class InpaintingMaskEditor(QDialog):
         self.keep_largest_masks_btn.clicked.connect(self.keep_largest_mask_all_keyframes)
         self.keep_largest_masks_btn.setStyleSheet(cleanup_button_style)
         toolbar_layout.addWidget(self.keep_largest_masks_btn)
+
+        edge_section_label = QLabel("Edge")
+        edge_section_label.setStyleSheet(section_label_style)
+        toolbar_layout.addWidget(edge_section_label)
+
+        self.expand_edge_btn = QPushButton("Snap Mask")
+        self.expand_edge_btn.setMinimumWidth(84)
+        self.expand_edge_btn.setToolTip("Expand the current mask to any viewer edge that is already within the threshold")
+        self.expand_edge_btn.clicked.connect(self.expand_mask_to_edges_current_frame)
+        self.expand_edge_btn.setStyleSheet(edge_button_style)
+        toolbar_layout.addWidget(self.expand_edge_btn)
+
+        self.edge_snap_label = QLabel("Threshold")
+        self.edge_snap_label.setToolTip("If mask pixels are within this percent of an edge, extend them to that edge")
+        toolbar_layout.addWidget(self.edge_snap_label)
+
+        self.edge_snap_spinner = QSpinBox()
+        self.edge_snap_spinner.setRange(0, 50)
+        self.edge_snap_spinner.setSingleStep(1)
+        self.edge_snap_spinner.setSuffix("%")
+        self.edge_snap_spinner.setMaximumWidth(68)
+        saved_edge_snap = self.settings.value('mask_editor_edge_snap_percent', 10, type=int)
+        self.edge_snap_spinner.setValue(saved_edge_snap)
+        self.edge_snap_spinner.valueChanged.connect(
+            lambda value: self.settings.setValue('mask_editor_edge_snap_percent', int(value))
+        )
+        toolbar_layout.addWidget(self.edge_snap_spinner)
         
         # Bake liquify button (only visible in liquify mode)
         self.bake_liquify_btn = QPushButton("Bake Liquify")
@@ -1070,6 +1110,7 @@ class InpaintingMaskEditor(QDialog):
         self.mask_widget.target_vertex_count = initial_vertex_count
         self.mask_widget.show_lattice = saved_show_lattice
         self.mask_widget.liquify_grid_size = saved_lattice_size
+        self.mask_widget._last_brush_mode = self.initial_mode if self.initial_mode in ["brush", "shape"] else "brush"
         
         mask_layout.addWidget(self.mask_widget)
         mask_group.setLayout(mask_layout)
@@ -1225,12 +1266,13 @@ class InpaintingMaskEditor(QDialog):
         super().showEvent(event)
         if not hasattr(self, '_startup_vertex_sync_done'):
             self._startup_vertex_sync_done = True
-            # Force uniform startup target and normalize all existing keyframes once.
+            # Sync the startup target to the current slider value once.
+            current_vertex_count = int(self.vertex_count_slider.value())
             self.vertex_count_slider.blockSignals(True)
-            self.vertex_count_slider.setValue(150)
+            self.vertex_count_slider.setValue(current_vertex_count)
             self.vertex_count_slider.blockSignals(False)
-            self.apply_vertex_count_setting(150, persist_setting=True)
-            self.normalize_shape_keyframes_to_target_vertices(150)
+            self.apply_vertex_count_setting(current_vertex_count, persist_setting=True)
+            self.normalize_shape_keyframes_to_target_vertices(current_vertex_count)
     
     def update_brush_button_icon(self):
         """Update the brush button icon based on current brush mode"""
@@ -1783,7 +1825,11 @@ class InpaintingMaskEditor(QDialog):
         self.mask_widget.set_mask(mask, frame)
         
         # Update mask from shapes if in shape mode or liquify mode (for interpolation)
-        if self.drawing_mode in ["shape", "liquify"]:
+        if (
+            self.drawing_mode in ["shape", "liquify"] and
+            hasattr(self.mask_widget, 'shape_keyframes') and
+            bool(self.mask_widget.shape_keyframes)
+        ):
             self.mask_widget.update_mask_from_shapes()
         
         # Update Apply to Current button state
@@ -1886,6 +1932,175 @@ class InpaintingMaskEditor(QDialog):
         self.update_display()
         # Restore focus to mask widget for keyboard shortcuts
         self.mask_widget.setFocus()
+
+    def _expand_mask_to_near_edges(self, mask, threshold_percent):
+        if mask is None:
+            return None, []
+
+        expanded = mask.copy()
+        if expanded.ndim != 2 or expanded.size == 0:
+            return expanded, []
+
+        threshold_percent = max(0.0, float(threshold_percent))
+        if threshold_percent <= 0:
+            return expanded, []
+
+        h, w = expanded.shape
+        threshold_x = int(np.ceil(w * threshold_percent / 100.0))
+        threshold_y = int(np.ceil(h * threshold_percent / 100.0))
+        if threshold_x <= 0 and threshold_y <= 0:
+            return expanded, []
+
+        original_active = expanded > 0
+        touched_edges = []
+
+        if threshold_x > 0:
+            left_rows = np.where(np.any(original_active[:, :threshold_x], axis=1))[0]
+            left_changed = False
+            for row in left_rows:
+                active_cols = np.flatnonzero(original_active[row])
+                if active_cols.size == 0:
+                    continue
+                first_col = int(active_cols[0])
+                if first_col <= 0:
+                    continue
+                fill_value = int(np.max(expanded[row, active_cols]))
+                expanded[row, :first_col + 1] = fill_value
+                left_changed = True
+            if left_changed:
+                touched_edges.append("left")
+
+            right_rows = np.where(np.any(original_active[:, max(0, w - threshold_x):], axis=1))[0]
+            right_changed = False
+            for row in right_rows:
+                active_cols = np.flatnonzero(original_active[row])
+                if active_cols.size == 0:
+                    continue
+                last_col = int(active_cols[-1])
+                if last_col >= w - 1:
+                    continue
+                fill_value = int(np.max(expanded[row, active_cols]))
+                expanded[row, last_col:] = fill_value
+                right_changed = True
+            if right_changed:
+                touched_edges.append("right")
+
+        if threshold_y > 0:
+            top_cols = np.where(np.any(original_active[:threshold_y, :], axis=0))[0]
+            top_changed = False
+            for col in top_cols:
+                active_rows = np.flatnonzero(original_active[:, col])
+                if active_rows.size == 0:
+                    continue
+                first_row = int(active_rows[0])
+                if first_row <= 0:
+                    continue
+                fill_value = int(np.max(expanded[active_rows, col]))
+                expanded[:first_row + 1, col] = fill_value
+                top_changed = True
+            if top_changed:
+                touched_edges.append("top")
+
+            bottom_cols = np.where(np.any(original_active[max(0, h - threshold_y):, :], axis=0))[0]
+            bottom_changed = False
+            for col in bottom_cols:
+                active_rows = np.flatnonzero(original_active[:, col])
+                if active_rows.size == 0:
+                    continue
+                last_row = int(active_rows[-1])
+                if last_row >= h - 1:
+                    continue
+                fill_value = int(np.max(expanded[active_rows, col]))
+                expanded[last_row:, col] = fill_value
+                bottom_changed = True
+            if bottom_changed:
+                touched_edges.append("bottom")
+
+        return expanded, touched_edges
+
+    def _shape_keyframes_from_mask(self, mask):
+        if mask is None or mask.ndim != 2:
+            return []
+
+        binary_mask = np.where(mask > 0, 255, 0).astype(np.uint8)
+        contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        target_vertices = int(self.vertex_count_slider.value()) if hasattr(self, 'vertex_count_slider') else 150
+        shapes = []
+
+        for contour in contours:
+            if contour is None or len(contour) < 3:
+                continue
+            if cv2.contourArea(contour) < 1.0:
+                continue
+            vertices = contour.reshape(-1, 2).tolist()
+            if len(vertices) < 3:
+                continue
+            if target_vertices > 0 and len(vertices) != target_vertices:
+                vertices = self.mask_widget.resample_vertices(vertices, target_vertices)
+            shapes.append({
+                'vertices': [[float(x), float(y)] for x, y in vertices],
+                'vertex_count': len(vertices),
+                'filled': True,
+                'closed': True,
+                'visible': True,
+                'is_shape': True,
+            })
+
+        return shapes
+
+    def expand_mask_to_edges_current_frame(self):
+        threshold_percent = int(self.edge_snap_spinner.value()) if hasattr(self, 'edge_snap_spinner') else 10
+        frame_index = self.current_frame_index
+        shape_mode = self.drawing_mode in ["shape", "liquify"]
+
+        source_mask = self.mask_frames[frame_index].copy()
+        if not np.any(source_mask > 0):
+            QMessageBox.information(self, "No Mask", "Current frame does not contain any mask pixels to expand.")
+            return
+
+        expanded_mask, touched_edges = self._expand_mask_to_near_edges(source_mask, threshold_percent)
+        if expanded_mask is None or not touched_edges:
+            QMessageBox.information(
+                self,
+                "No Edge Snap",
+                f"No mask pixels were within {threshold_percent}% of the frame edges."
+            )
+            return
+
+        self.mask_widget.save_undo_state(
+            "Snap mask to edges",
+            full_snapshot=shape_mode,
+            affected_frames=[frame_index],
+        )
+
+        if shape_mode:
+            if self.drawing_mode == "liquify":
+                self.mask_widget.liquify_deformation_field = None
+                self.mask_widget.liquify_original_shapes = None
+                self.mask_widget._temp_deformed_shapes = None
+                self.mask_widget.is_liquifying = False
+
+            if not hasattr(self.mask_widget, 'shape_keyframes'):
+                self.mask_widget.shape_keyframes = {}
+            self.mask_widget.shape_keyframes[frame_index] = self._shape_keyframes_from_mask(expanded_mask)
+            self.mask_widget.invalidate_shape_cache()
+            self.mask_frames[frame_index] = expanded_mask
+            self.mask_widget.set_mask(self.mask_frames[frame_index], self.video_frames[frame_index])
+            self.mask_widget.update_mask_from_shapes()
+        else:
+            self.mask_frames[frame_index] = expanded_mask
+            self.mask_widget.set_mask(self.mask_frames[frame_index], self.video_frames[frame_index])
+
+        self.update_mask_frame_tracking()
+        self.update_display()
+        self.mask_widget.setFocus()
+
+        edge_list = ", ".join(touched_edges)
+        QMessageBox.information(
+            self,
+            "Mask Snapped",
+            f"Expanded the current mask to the {edge_list} edge(s) using a {threshold_percent}% threshold."
+        )
         
     def clear_all_frames(self):
         """Clear masks for all frames"""
@@ -2441,7 +2656,11 @@ class InpaintingMaskEditor(QDialog):
     def get_masks(self):
         """Get the edited mask frames"""
         # If in shape mode, ensure masks are updated from shapes
-        if self.drawing_mode == "shape":
+        if (
+            self.drawing_mode in ["shape", "liquify"] and
+            hasattr(self.mask_widget, 'shape_keyframes') and
+            bool(self.mask_widget.shape_keyframes)
+        ):
             # Store current frame index
             original_index = self.current_frame_index
             
@@ -7742,6 +7961,4 @@ class MaskDrawingWidget(QWidget):
         
         # Update the display
         self.update()
-
-
 

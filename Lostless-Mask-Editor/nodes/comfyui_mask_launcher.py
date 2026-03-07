@@ -2061,6 +2061,7 @@ def main():
         try:
             project = json.loads(project_data) if isinstance(project_data, str) else project_data
             print(f"[ComfyUI Mask Editor] Successfully parsed project data")
+            project_settings = project.get("settings", {}) if isinstance(project.get("settings"), dict) else {}
             
             # Load video frames for session restore
             loaded_frames = []
@@ -2303,6 +2304,26 @@ def main():
                 editor.current_frame_index = project["current_frame"]
                 if hasattr(editor, 'on_frame_changed'):
                     editor.on_frame_changed(editor.current_frame_index)
+
+            if project_settings:
+                settings_mode = project_settings.get("drawing_mode")
+                if settings_mode and hasattr(editor, 'initial_mode'):
+                    editor.initial_mode = settings_mode
+                    if hasattr(editor, 'mask_widget') and settings_mode in ["brush", "shape"]:
+                        editor.mask_widget._last_brush_mode = settings_mode
+
+                if "brush_size" in project_settings and hasattr(editor, 'brush_size_slider'):
+                    brush_size = int(project_settings["brush_size"])
+                    editor.brush_size = brush_size
+                    editor.brush_size_slider.setValue(brush_size)
+
+                if "vertex_count" in project_settings and hasattr(editor, 'vertex_count_slider'):
+                    vertex_count = int(project_settings["vertex_count"])
+                    editor.vertex_count_slider.blockSignals(True)
+                    editor.vertex_count_slider.setValue(vertex_count)
+                    editor.vertex_count_slider.blockSignals(False)
+                    if hasattr(editor, 'apply_vertex_count_setting'):
+                        editor.apply_vertex_count_setting(vertex_count, persist_setting=False)
                     
             if "drawing_mode" in project and hasattr(editor, 'set_drawing_mode'):
                 editor.set_drawing_mode(project["drawing_mode"])
@@ -2469,6 +2490,7 @@ def main():
             "settings": {
                 "drawing_mode": editor.drawing_mode if hasattr(editor, 'drawing_mode') else "brush",
                 "brush_size": getattr(editor, 'brush_size', 30),
+                "vertex_count": editor.vertex_count_slider.value() if hasattr(editor, 'vertex_count_slider') else 150,
             },
             "video_info": {
                 "path": editor.source_video_path if hasattr(editor, 'source_video_path') else None,
