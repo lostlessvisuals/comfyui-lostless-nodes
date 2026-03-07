@@ -1799,7 +1799,7 @@ def load_video_file(app):
 def main():
     print("[MASK EDITOR LAUNCHER] Entered main() function")
     
-    parser = argparse.ArgumentParser(description="ComfyUI Mask Editor")
+    parser = argparse.ArgumentParser(description="ComfyUI Lostless Mask Editor")
     parser.add_argument("--config", required=True, help="Path to config JSON file")
     args = parser.parse_args()
     
@@ -1829,7 +1829,7 @@ def main():
     )
     logger = logging.getLogger(__name__)
     logger.info("="*50)
-    logger.info("Mask Editor Starting")
+    logger.info("Lostless Mask Editor Starting")
     logger.info(f"Executed script: {os.path.abspath(__file__)}")
     logger.info(f"Working directory: {os.getcwd()}")
     logger.info("="*50)
@@ -2031,7 +2031,7 @@ def main():
     
     # Create and configure the enhanced mask editor
     editor = EnhancedMaskEditor(frames)
-    editor.setWindowTitle("Mask Editor - ComfyUI")
+    editor.setWindowTitle("Lostless Mask Editor - ComfyUI")
     
     # Set output directory for session auto-save
     editor.output_dir = config.get("output_dir", "output")

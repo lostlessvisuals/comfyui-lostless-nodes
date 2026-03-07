@@ -15,19 +15,23 @@ print(f"[Lostless Mask Editor] Module name: {__name__}")
 print(f"[Lostless Mask Editor] Package path: {os.path.dirname(current_file)}")
 
 print("[Lostless Mask Editor] Loading custom nodes...")
+_MINIMAL_IMPORT = bool(globals().get("LOSTLESS_MINIMAL_IMPORT", False))
+if _MINIMAL_IMPORT:
+    print("[Lostless Mask Editor] Minimal import mode enabled for top-level ComfyUI loader")
 
-# Import server endpoints
-try:
-    from . import mask_editor_server
-    print("[Lostless Mask Editor] Mask editor server endpoints loaded")
-except Exception as e:
-    print(f"[Lostless Mask Editor] Failed to load mask editor server: {e}")
+# Import server endpoints only for the broader embedded package surface.
+if not _MINIMAL_IMPORT:
+    try:
+        from . import mask_editor_server
+        print("[Lostless Mask Editor] Mask editor server endpoints loaded")
+    except Exception as e:
+        print(f"[Lostless Mask Editor] Failed to load mask editor server: {e}")
 
-try:
-    from . import outpainting_editor_server
-    print("[Lostless Mask Editor] Outpainting editor server endpoints loaded")
-except Exception as e:
-    print(f"[Lostless Mask Editor] Failed to load outpainting editor server: {e}")
+    try:
+        from . import outpainting_editor_server
+        print("[Lostless Mask Editor] Outpainting editor server endpoints loaded")
+    except Exception as e:
+        print(f"[Lostless Mask Editor] Failed to load outpainting editor server: {e}")
 
 # Define mask editor node directly here to ensure it loads
 # TRULY PERSISTENT GLOBAL CACHE that survives module reloads
@@ -126,7 +130,7 @@ class MaskEditor:
     RETURN_TYPES = ("MASK", "IMAGE")
     RETURN_NAMES = ("masks", "mask_image")
     FUNCTION = "edit_mask"
-    CATEGORY = "Mask Editor"
+    CATEGORY = "lostless/mask"
 
     def _build_result(self, masks, status):
         return {
@@ -256,43 +260,6 @@ class MaskEditor:
             masks = masks / 255.0
         masks = torch.clamp(masks, 0.0, 1.0)
         return masks.unsqueeze(-1).expand(-1, -1, -1, 3).contiguous()
-
-    def _load_project_text_from_file(self, project_file_path):
-        path = str(project_file_path or "").strip()
-        if not path:
-            return ""
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"Project file not found: {path}")
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
-
-    def _parse_project_data_text(self, project_data_text):
-        import json
-
-        if not project_data_text:
-            return None
-        parsed = json.loads(project_data_text)
-        if not isinstance(parsed, dict):
-            raise ValueError("Project data must decode to a JSON object.")
-        return parsed
-
-    def _filter_project_frames(self, project_data, frame_count):
-        def _filter_frame_dict(value):
-            if not isinstance(value, dict):
-                return {}
-            filtered = {}
-            for key, item in value.items():
-                try:
-                    idx = int(key)
-                except Exception:
-                    continue
-                if 0 <= idx < frame_count:
-                    filtered[str(idx)] = item
-            return filtered
-
-        project_data["shape_keyframes"] = _filter_frame_dict(project_data.get("shape_keyframes", {}))
-        project_data["mask_frames"] = _filter_frame_dict(project_data.get("mask_frames", {}))
-        return project_data
 
     def edit_mask(
         self,
@@ -480,7 +447,7 @@ class WANVaceImageToMask:
         import torch
 
         if images is None:
-            raise ValueError("WANVaceImageToMask requires an IMAGE input.")
+            raise ValueError("Lostless Image To Mask requires an IMAGE input.")
 
         if images.ndim == 3:
             images = images.unsqueeze(0)
@@ -950,59 +917,58 @@ class WANVaceOutpaintingEditor:
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 
-# Add the mask editor and outpainting editor first
+# Add the always-exposed mask nodes first
 NODE_CLASS_MAPPINGS["MaskEditor"] = MaskEditor
-NODE_DISPLAY_NAME_MAPPINGS["MaskEditor"] = "Mask Editor"
+NODE_DISPLAY_NAME_MAPPINGS["MaskEditor"] = "Lostless Mask Editor"
 
 NODE_CLASS_MAPPINGS["WANVaceImageToMask"] = WANVaceImageToMask
 NODE_DISPLAY_NAME_MAPPINGS["WANVaceImageToMask"] = "Lostless Image To Mask"
 
-NODE_CLASS_MAPPINGS["WANVaceOutpaintingEditor"] = WANVaceOutpaintingEditor
-NODE_DISPLAY_NAME_MAPPINGS["WANVaceOutpaintingEditor"] = "Lostless Outpainting Editor ðŸŽ¨"
+if _MINIMAL_IMPORT:
+    print("[Lostless Mask Editor] Skipping embedded legacy/outpainting node registrations")
+else:
+    NODE_CLASS_MAPPINGS["WANVaceOutpaintingEditor"] = WANVaceOutpaintingEditor
+    NODE_DISPLAY_NAME_MAPPINGS["WANVaceOutpaintingEditor"] = "Lostless Outpainting Editor ðŸŽ¨"
 
-# Try to load crop and stitch nodes first (these should work independently)
-print("[Lostless Mask Editor] Loading crop and stitch nodes...")
-try:
-    from .wan_cropandstitch import WanCropImproved
-    from .wan_cropandstitch import WanStitchImproved
-    
-    NODE_CLASS_MAPPINGS["WanCropImproved"] = WanCropImproved
-    NODE_CLASS_MAPPINGS["WanStitchImproved"] = WanStitchImproved
-    
-    NODE_DISPLAY_NAME_MAPPINGS["WanCropImproved"] = "Lostless Crop âœ‚ï¸"
-    NODE_DISPLAY_NAME_MAPPINGS["WanStitchImproved"] = "Lostless Stitch âœ‚ï¸"
-    
-    print("[Lostless Mask Editor] âœ… Successfully loaded crop and stitch nodes")
-except Exception as crop_e:
-    print(f"[Lostless Mask Editor] âŒ ERROR loading crop and stitch nodes: {crop_e}")
-    import traceback
-    traceback.print_exc()
+    # Try to load crop and stitch nodes first (these should work independently)
+    print("[Lostless Mask Editor] Loading crop and stitch nodes...")
+    try:
+        from .wan_cropandstitch import WanCropImproved
+        from .wan_cropandstitch import WanStitchImproved
 
-# Try to load main nodes
-try:
-    from .node_mappings import NODE_CLASS_MAPPINGS as MAIN_NODE_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as MAIN_DISPLAY_MAPPINGS
-    print(f"[Lostless Mask Editor] Successfully loaded {len(MAIN_NODE_MAPPINGS)} nodes from node_mappings")
-    
-    # Merge the main nodes with our existing mappings
-    NODE_CLASS_MAPPINGS.update(MAIN_NODE_MAPPINGS)
-    NODE_DISPLAY_NAME_MAPPINGS.update(MAIN_DISPLAY_MAPPINGS)
-    
-    # List all loaded nodes
-    print("[Lostless Mask Editor] All loaded nodes:")
-    for node_name in NODE_CLASS_MAPPINGS:
-        print(f"  - {node_name}")
-        
-except Exception as e:
-    print(f"[Lostless Mask Editor] ERROR loading main nodes: {e}")
-    import traceback
-    traceback.print_exc()
-    print("[Lostless Mask Editor] Continuing with mask editor and crop/stitch nodes only")
+        NODE_CLASS_MAPPINGS["WanCropImproved"] = WanCropImproved
+        NODE_CLASS_MAPPINGS["WanStitchImproved"] = WanStitchImproved
+
+        NODE_DISPLAY_NAME_MAPPINGS["WanCropImproved"] = "Lostless Crop âœ‚ï¸"
+        NODE_DISPLAY_NAME_MAPPINGS["WanStitchImproved"] = "Lostless Stitch âœ‚ï¸"
+
+        print("[Lostless Mask Editor] âœ… Successfully loaded crop and stitch nodes")
+    except Exception as crop_e:
+        print(f"[Lostless Mask Editor] âŒ ERROR loading crop and stitch nodes: {crop_e}")
+        import traceback
+        traceback.print_exc()
+
+    # Try to load main nodes
+    try:
+        from .node_mappings import NODE_CLASS_MAPPINGS as MAIN_NODE_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as MAIN_DISPLAY_MAPPINGS
+        print(f"[Lostless Mask Editor] Successfully loaded {len(MAIN_NODE_MAPPINGS)} nodes from node_mappings")
+
+        # Merge the main nodes with our existing mappings
+        NODE_CLASS_MAPPINGS.update(MAIN_NODE_MAPPINGS)
+        NODE_DISPLAY_NAME_MAPPINGS.update(MAIN_DISPLAY_MAPPINGS)
+
+        # List all loaded nodes
+        print("[Lostless Mask Editor] All loaded nodes:")
+        for node_name in NODE_CLASS_MAPPINGS:
+            print(f"  - {node_name}")
+
+    except Exception as e:
+        print(f"[Lostless Mask Editor] ERROR loading main nodes: {e}")
+        import traceback
+        traceback.print_exc()
+        print("[Lostless Mask Editor] Continuing with mask editor and crop/stitch nodes only")
 
 import os
 WEB_DIRECTORY = os.path.join(os.path.dirname(__file__), "web")
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
-
-
-
-
