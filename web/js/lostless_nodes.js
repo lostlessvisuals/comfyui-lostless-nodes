@@ -5,6 +5,7 @@ const RANDOM_IMAGE_NODE = "LostlessRandomImage";
 const RANDOMIZE_BUTTON_NODE = "LostlessRandomizeButton";
 const LOOP_CUT_PLANNER_NODE = "LostlessLoopCutPlanner";
 const LOOP_CUTTER_NODE = "LostlessLoopCutter";
+const MASK_EDITOR_NODE = "MaskEditor";
 
 function getWidget(node, name) {
   return (node.widgets || []).find((widget) => widget.name === name);
@@ -1301,6 +1302,115 @@ app.registerExtension({
           { serialize: false }
         );
 
+        return result;
+      };
+    }
+
+    if (nodeData.name === MASK_EDITOR_NODE) {
+      const onNodeCreated = nodeType.prototype.onNodeCreated;
+      const onConfigure = nodeType.prototype.onConfigure;
+      const onExecuted = nodeType.prototype.onExecuted;
+
+      async function refreshMaskEditorMemoryStatus(node) {
+        const statusWidget = node.widgets?.find((widget) => widget.name === "memory_status");
+        const reuseWidget = getWidget(node, "reuse_last_edit");
+        if (!statusWidget) {
+          return;
+        }
+
+        if (!reuseWidget?.value) {
+          statusWidget.value = "Memory: off";
+          markNodeDirty(node);
+          return;
+        }
+
+        try {
+          const { data } = await postJson("/lostless/mask_editor/memory_status", {
+            node_id: node.id,
+          });
+          statusWidget.value = data?.memory_status || "Memory: empty";
+        } catch (error) {
+          console.error("Lostless mask editor memory status error:", error);
+          statusWidget.value = "Memory: unavailable";
+        }
+
+        markNodeDirty(node);
+      }
+
+      nodeType.prototype.onNodeCreated = function () {
+        const result = onNodeCreated?.apply(this, arguments);
+        if (this.__lostless_mask_editor_memory_ready) {
+          return result;
+        }
+        this.__lostless_mask_editor_memory_ready = true;
+
+        const reuseWidget = getWidget(this, "reuse_last_edit");
+        const originalCallback = reuseWidget?.callback;
+        if (reuseWidget) {
+          reuseWidget.callback = (...args) => {
+            originalCallback?.apply(reuseWidget, args);
+            refreshMaskEditorMemoryStatus(this);
+          };
+        }
+
+        this.addWidget(
+          "button",
+          "Clear Memory",
+          "",
+          async () => {
+            try {
+              const { data } = await postJson("/lostless/mask_editor/clear_memory", {
+                node_id: this.id,
+              });
+              const statusWidget = this.widgets?.find((widget) => widget.name === "memory_status");
+              if (statusWidget) {
+                statusWidget.value = data?.memory_status || "Memory: empty";
+              }
+              markNodeDirty(this);
+            } catch (error) {
+              console.error("Lostless clear mask editor memory error:", error);
+            }
+          },
+          { serialize: false }
+        );
+
+        const statusWidget = this.addWidget(
+          "text",
+          "memory_status",
+          "Memory: off",
+          () => {},
+          { multiline: false, serialize: false }
+        );
+        statusWidget.disabled = true;
+        makeReadOnly(statusWidget);
+
+        setTimeout(() => {
+          refreshMaskEditorMemoryStatus(this);
+        }, 0);
+
+        return result;
+      };
+
+      nodeType.prototype.onConfigure = function () {
+        const result = onConfigure?.apply(this, arguments);
+        setTimeout(() => {
+          refreshMaskEditorMemoryStatus(this);
+        }, 0);
+        return result;
+      };
+
+      nodeType.prototype.onExecuted = function (message) {
+        const result = onExecuted?.apply(this, arguments);
+        const status = Array.isArray(message?.memory_status) ? message.memory_status[0] : null;
+        const statusWidget = this.widgets?.find((widget) => widget.name === "memory_status");
+        if (statusWidget && typeof status === "string" && status.trim()) {
+          statusWidget.value = status;
+          markNodeDirty(this);
+        } else {
+          setTimeout(() => {
+            refreshMaskEditorMemoryStatus(this);
+          }, 0);
+        }
         return result;
       };
     }

@@ -5,6 +5,7 @@ Video frame processing nodes for AI interpolation workflows
 
 import os
 import sys
+import time
 
 # Print debug info about which file is being loaded
 current_file = os.path.abspath(__file__)
@@ -32,12 +33,76 @@ except Exception as e:
 # TRULY PERSISTENT GLOBAL CACHE that survives module reloads
 import sys
 _CACHE_ATTR_NAME = "mask_editor_global_cache"
+_MASK_EDITOR_MEMORY_KEY = "mask_editor_reuse_last_edit"
+_MASK_EDITOR_MEMORY_ROUTES_KEY = "mask_editor_reuse_last_edit_routes"
 
 def get_persistent_cache():
     """Get cache that persists across ComfyUI module reloads"""
     if not hasattr(sys.modules[__name__], _CACHE_ATTR_NAME):
         setattr(sys.modules[__name__], _CACHE_ATTR_NAME, {})
     return getattr(sys.modules[__name__], _CACHE_ATTR_NAME)
+
+def get_mask_editor_memory_cache():
+    cache = get_persistent_cache()
+    if _MASK_EDITOR_MEMORY_KEY not in cache:
+        cache[_MASK_EDITOR_MEMORY_KEY] = {}
+    return cache[_MASK_EDITOR_MEMORY_KEY]
+
+def clear_mask_editor_memory(unique_id=None):
+    cache = get_mask_editor_memory_cache()
+    if unique_id is None:
+        cleared = bool(cache)
+        cache.clear()
+        return cleared
+    return cache.pop(str(unique_id), None) is not None
+
+def get_mask_editor_memory_status(unique_id=None):
+    cache = get_mask_editor_memory_cache()
+    if unique_id is None:
+        return {"has_memory": False, "memory_status": "Memory: unavailable"}
+    entry = cache.get(str(unique_id))
+    if not entry:
+        return {"has_memory": False, "memory_status": "Memory: empty"}
+    shape = entry.get("shape")
+    shape_text = ""
+    if isinstance(shape, (tuple, list)) and len(shape) == 3:
+        shape_text = f" ({shape[0]}f {shape[2]}x{shape[1]})"
+    return {
+        "has_memory": True,
+        "memory_status": f"Memory: cached{shape_text}",
+        "updated_at": entry.get("updated_at"),
+    }
+
+try:
+    from aiohttp import web
+    from server import PromptServer
+
+    _route_cache = get_persistent_cache()
+    if not _route_cache.get(_MASK_EDITOR_MEMORY_ROUTES_KEY):
+        _route_cache[_MASK_EDITOR_MEMORY_ROUTES_KEY] = True
+
+        @PromptServer.instance.routes.post("/lostless/mask_editor/clear_memory")
+        async def lostless_mask_editor_clear_memory(request):
+            data = await request.json()
+            unique_id = data.get("node_id")
+            cleared = clear_mask_editor_memory(unique_id)
+            status = get_mask_editor_memory_status(unique_id)
+            return web.json_response({
+                "success": True,
+                "cleared": cleared,
+                **status,
+            })
+
+        @PromptServer.instance.routes.post("/lostless/mask_editor/memory_status")
+        async def lostless_mask_editor_memory_status(request):
+            data = await request.json()
+            unique_id = data.get("node_id")
+            return web.json_response({
+                "success": True,
+                **get_mask_editor_memory_status(unique_id),
+            })
+except Exception as e:
+    print(f"[Lostless Mask Editor] Failed to register memory routes: {e}")
 
 class MaskEditor:
     NOT_IDEMPOTENT = True
@@ -48,9 +113,13 @@ class MaskEditor:
             "required": {
                 "images": ("IMAGE",),
                 "edit_mode": ("BOOLEAN", {"default": True}),
+                "reuse_last_edit": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "masks": ("MASK",),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
             }
         }
 
@@ -58,6 +127,56 @@ class MaskEditor:
     RETURN_NAMES = ("masks", "mask_image")
     FUNCTION = "edit_mask"
     CATEGORY = "Mask Editor"
+
+    def _build_result(self, masks, status):
+        return {
+            "ui": {
+                "memory_status": [status],
+            },
+            "result": (masks, self._mask_to_bw_image(masks)),
+        }
+
+    def _normalize_cache_shape(self, shape):
+        if isinstance(shape, (tuple, list)) and len(shape) == 3:
+            try:
+                return tuple(int(v) for v in shape)
+            except Exception:
+                return None
+        return None
+
+    def _get_cached_masks(self, unique_id, expected_shape):
+        if unique_id is None:
+            return None, "Memory: unavailable"
+
+        entry = get_mask_editor_memory_cache().get(str(unique_id))
+        if not entry:
+            return None, "Memory: empty"
+
+        cache_shape = self._normalize_cache_shape(entry.get("shape"))
+        if cache_shape != tuple(int(v) for v in expected_shape):
+            return None, "Memory: stale, used input"
+
+        import torch
+
+        cached_masks = entry.get("masks")
+        if cached_masks is None:
+            return None, "Memory: empty"
+
+        tensor = torch.from_numpy(cached_masks.astype("float32") / 255.0)
+        return tensor, "Memory: reused last edit"
+
+    def _store_cached_masks(self, unique_id, masks):
+        if unique_id is None:
+            return
+        import numpy as np
+
+        masks_cpu = masks.detach().cpu().numpy().astype(np.float32)
+        masks_u8 = np.clip(masks_cpu * 255.0, 0, 255).astype(np.uint8)
+        get_mask_editor_memory_cache()[str(unique_id)] = {
+            "masks": masks_u8,
+            "shape": tuple(int(v) for v in masks_u8.shape),
+            "updated_at": time.time(),
+        }
 
     def _normalize_images(self, images):
         import torch
@@ -180,6 +299,8 @@ class MaskEditor:
         images,
         masks=None,
         edit_mode=True,
+        reuse_last_edit=False,
+        unique_id=None,
     ):
         import base64
         import cv2
@@ -190,14 +311,25 @@ class MaskEditor:
         import torch
 
         images = self._normalize_images(images)
+        expected_mask_shape = (
+            int(images.shape[0]),
+            int(images.shape[1]),
+            int(images.shape[2]),
+        )
         masks_were_provided = masks is not None
-        if masks is None:
+        memory_status = "Memory: off"
+        cached_masks = None
+        if reuse_last_edit:
+            cached_masks, memory_status = self._get_cached_masks(unique_id, expected_mask_shape)
+        if cached_masks is not None:
+            masks = cached_masks.to(device=images.device)
+        elif masks is None:
             masks = self._make_zero_masks_like_images(images)
         else:
             masks = self._normalize_masks(masks, images.shape)
 
         if not edit_mode:
-            return (masks, self._mask_to_bw_image(masks))
+            return self._build_result(masks, memory_status)
 
         frame_count = int(images.shape[0])
         height = int(images.shape[1])
@@ -320,9 +452,13 @@ class MaskEditor:
             )
 
         edited_masks_tensor = torch.from_numpy(edited_masks.astype(np.float32) / 255.0)
-        edited_mask_image_tensor = self._mask_to_bw_image(edited_masks_tensor)
+        if reuse_last_edit:
+            self._store_cached_masks(unique_id, edited_masks_tensor)
+            memory_status = "Memory: saved last edit"
+        elif cached_masks is not None:
+            memory_status = "Memory: used cache once"
 
-        return (edited_masks_tensor, edited_mask_image_tensor)
+        return self._build_result(edited_masks_tensor, memory_status)
 class WANVaceImageToMask:
     @classmethod
     def INPUT_TYPES(cls):
@@ -866,8 +1002,6 @@ import os
 WEB_DIRECTORY = os.path.join(os.path.dirname(__file__), "web")
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
-
-
 
 
 
