@@ -48,33 +48,9 @@ class MaskEditor:
             "required": {
                 "images": ("IMAGE",),
                 "edit_mode": ("BOOLEAN", {"default": True}),
-                "project_source": (
-                    ["Auto", "Mask Input", "Project (Port/File)"],
-                    {"default": "Auto"},
-                ),
-                "project_file_action": (
-                    ["None", "Load", "Save", "Load+Save"],
-                    {"default": "None"},
-                ),
-                "project_file_path": (
-                    "STRING",
-                    {
-                        "default": "",
-                        "multiline": False,
-                        "placeholder": "Optional .json/.wmp path for project load/save",
-                    },
-                ),
             },
             "optional": {
                 "masks": ("MASK",),
-                "project_data_in": (
-                    "STRING",
-                    {
-                        "default": "",
-                        "multiline": False,
-                        "forceInput": True,
-                    },
-                ),
             }
         }
 
@@ -160,7 +136,6 @@ class MaskEditor:
         if float(masks.max().item()) > 1.0:
             masks = masks / 255.0
         masks = torch.clamp(masks, 0.0, 1.0)
-        masks = (masks >= 0.5).to(torch.float32)
         return masks.unsqueeze(-1).expand(-1, -1, -1, 3).contiguous()
 
     def _load_project_text_from_file(self, project_file_path):
@@ -205,10 +180,6 @@ class MaskEditor:
         images,
         masks=None,
         edit_mode=True,
-        project_source="Auto",
-        project_file_action="None",
-        project_file_path="",
-        project_data_in="",
     ):
         import base64
         import cv2
@@ -219,38 +190,14 @@ class MaskEditor:
         import torch
 
         images = self._normalize_images(images)
-
-        project_file_action = str(project_file_action or "None")
-        project_source = str(project_source or "Auto")
-        project_file_path = str(project_file_path or "")
-        project_data_in = str(project_data_in or "")
-
-        loaded_project_text = ""
-        if project_file_action in {"Load", "Load+Save"} and project_file_path.strip():
-            loaded_project_text = self._load_project_text_from_file(project_file_path)
-
-        incoming_project_text = loaded_project_text or project_data_in
-        use_project = False
-        if project_source == "Project (Port/File)":
-            use_project = bool(incoming_project_text)
-            if not use_project:
-                raise ValueError(
-                    "Project source is set to Project (Port/File), but no project data was provided "
-                    "via project_data_in or project_file_path/load."
-                )
-        elif project_source == "Auto":
-            use_project = bool(incoming_project_text)
-        elif project_source == "Mask Input":
-            use_project = False
-
-        if use_project:
-            # Project mode intentionally ignores the mask port to avoid conflicting sources.
+        masks_were_provided = masks is not None
+        if masks is None:
             masks = self._make_zero_masks_like_images(images)
         else:
             masks = self._normalize_masks(masks, images.shape)
 
         if not edit_mode:
-            return (masks, self._mask_to_bw_image(masks), incoming_project_text if use_project else "")
+            return (masks, self._mask_to_bw_image(masks), "")
 
         frame_count = int(images.shape[0])
         height = int(images.shape[1])
@@ -292,60 +239,16 @@ class MaskEditor:
             if not ok:
                 raise RuntimeError(f"Failed to encode input mask for frame {i}")
             mask_frames_payload[str(i)] = base64.b64encode(encoded.tobytes()).decode("utf-8")
-
-            # Convert incoming raster masks to editable vector keyframes.
-            binary_mask = np.where(mask_u8 > 0, 255, 0).astype(np.uint8)
-            contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            frame_shapes = []
-            for contour in contours:
-                if contour is None or len(contour) < 3:
-                    continue
-                epsilon = 0.002 * cv2.arcLength(contour, True)
-                approx = cv2.approxPolyDP(contour, epsilon, True)
-                vertices = approx.reshape(-1, 2).tolist()
-                if len(vertices) < 3:
-                    continue
-                frame_shapes.append({
-                    "vertices": [[float(x), float(y)] for x, y in vertices],
-                    "closed": True,
-                    "visible": True,
-                    "vertex_count": len(vertices),
-                    "is_shape": True,
-                })
-            if frame_shapes:
-                shape_keyframes_payload[str(i)] = frame_shapes
-
-        project_data = None
-        if use_project:
-            project_data = self._parse_project_data_text(incoming_project_text)
-            if project_data is None:
-                raise ValueError("Failed to load project data.")
-
-            project_data.setdefault("shape_keyframes", {})
-            project_data.setdefault("mask_frames", {})
-            project_data.setdefault("settings", {})
-            project_data.setdefault("current_frame", 0)
-            project_data = self._filter_project_frames(project_data, frame_count)
-
-            if not project_data["shape_keyframes"] and not project_data["mask_frames"]:
-                # Fallback if imported project is effectively empty.
-                project_data["shape_keyframes"] = shape_keyframes_payload
-                project_data["mask_frames"] = mask_frames_payload
-
-            project_data["settings"].setdefault("drawing_mode", "shape")
-            project_data["settings"].setdefault("brush_size", 30)
-            project_data["settings"].setdefault("vertex_count", 32)
-        else:
-            project_data = {
-                "shape_keyframes": shape_keyframes_payload,
-                "mask_frames": mask_frames_payload,
-                "settings": {
-                    "drawing_mode": "shape",
-                    "brush_size": 30,
-                    "vertex_count": 32,
-                },
-                "current_frame": 0,
-            }
+        project_data = {
+            "shape_keyframes": shape_keyframes_payload,
+            "mask_frames": mask_frames_payload,
+            "settings": {
+                "drawing_mode": "brush",
+                "brush_size": 20,
+                "vertex_count": 150,
+            },
+            "current_frame": 0,
+        }
 
         # Always bind the project to the current input image batch so old source paths
         # do not override the node's current frame sequence.
@@ -366,7 +269,7 @@ class MaskEditor:
         except Exception:
             project_data["current_frame"] = 0
 
-        source_msg = "project" if use_project else "mask_input"
+        source_msg = "mask_input" if masks_were_provided else "empty_mask"
         print(
             f"[MaskEditor] Launching editor source={source_msg}, frames={frame_count}, "
             f"image_size={(height, width)}, masks_shape={tuple(masks.shape)}, "
@@ -425,12 +328,6 @@ class MaskEditor:
             with open(project_data_json_path, "r", encoding="utf-8") as f:
                 project_data_out = f.read()
 
-        if project_file_action in {"Save", "Load+Save"} and project_file_path.strip() and project_data_out:
-            os.makedirs(os.path.dirname(os.path.abspath(project_file_path)), exist_ok=True)
-            with open(project_file_path, "w", encoding="utf-8") as f:
-                f.write(project_data_out)
-            print(f"[MaskEditor] Saved project data to: {project_file_path}")
-
         return (edited_masks_tensor, edited_mask_image_tensor, project_data_out)
 class WANVaceImageToMask:
     @classmethod
@@ -438,6 +335,7 @@ class WANVaceImageToMask:
         return {
             "required": {
                 "images": ("IMAGE",),
+                "conversion_mode": (["Preserve Grayscale", "Threshold"], {"default": "Preserve Grayscale"}),
                 "threshold": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "invert": ("BOOLEAN", {"default": False}),
             }
@@ -448,7 +346,7 @@ class WANVaceImageToMask:
     FUNCTION = "convert"
     CATEGORY = "lostless/mask"
 
-    def convert(self, images, threshold=0.5, invert=False):
+    def convert(self, images, conversion_mode="Preserve Grayscale", threshold=0.5, invert=False):
         import torch
 
         if images is None:
@@ -468,10 +366,14 @@ class WANVaceImageToMask:
             # ITU-R BT.709 luminance from RGB IMAGE input.
             gray = (0.2126 * images[..., 0]) + (0.7152 * images[..., 1]) + (0.0722 * images[..., 2])
 
-        masks = (gray >= float(threshold)).to(torch.float32)
+        if conversion_mode == "Threshold":
+            masks = (gray >= float(threshold)).to(torch.float32)
+        else:
+            masks = gray.to(torch.float32)
         if invert:
             masks = 1.0 - masks
 
+        masks = torch.clamp(masks, 0.0, 1.0)
         mask_image = masks.unsqueeze(-1).expand(-1, -1, -1, 3).contiguous()
         return (masks.contiguous(), mask_image)
 
@@ -970,7 +872,6 @@ import os
 WEB_DIRECTORY = os.path.join(os.path.dirname(__file__), "web")
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
-
 
 
 
