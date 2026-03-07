@@ -54,8 +54,8 @@ class MaskEditor:
             }
         }
 
-    RETURN_TYPES = ("MASK", "IMAGE", "STRING")
-    RETURN_NAMES = ("masks", "mask_image", "project_data")
+    RETURN_TYPES = ("MASK", "IMAGE")
+    RETURN_NAMES = ("masks", "mask_image")
     FUNCTION = "edit_mask"
     CATEGORY = "Mask Editor"
 
@@ -197,7 +197,7 @@ class MaskEditor:
             masks = self._normalize_masks(masks, images.shape)
 
         if not edit_mode:
-            return (masks, self._mask_to_bw_image(masks), "")
+            return (masks, self._mask_to_bw_image(masks))
 
         frame_count = int(images.shape[0])
         height = int(images.shape[1])
@@ -322,13 +322,7 @@ class MaskEditor:
         edited_masks_tensor = torch.from_numpy(edited_masks.astype(np.float32) / 255.0)
         edited_mask_image_tensor = self._mask_to_bw_image(edited_masks_tensor)
 
-        project_data_out = ""
-        project_data_json_path = os.path.join(output_dir, "project_data.json")
-        if os.path.exists(project_data_json_path):
-            with open(project_data_json_path, "r", encoding="utf-8") as f:
-                project_data_out = f.read()
-
-        return (edited_masks_tensor, edited_mask_image_tensor, project_data_out)
+        return (edited_masks_tensor, edited_mask_image_tensor)
 class WANVaceImageToMask:
     @classmethod
     def INPUT_TYPES(cls):
@@ -872,7 +866,6 @@ import os
 WEB_DIRECTORY = os.path.join(os.path.dirname(__file__), "web")
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
-
 
 
 
