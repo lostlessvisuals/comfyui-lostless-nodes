@@ -586,26 +586,42 @@ class InpaintingMaskEditor(QDialog):
         
         # Top toolbar (compact)
         top_toolbar = QWidget()
-        top_toolbar.setMinimumHeight(126)
-        top_toolbar.setMaximumHeight(190)
-        toolbar_shell_layout = QVBoxLayout(top_toolbar)
+        top_toolbar.setMinimumHeight(88)
+        top_toolbar.setMaximumHeight(132)
+        toolbar_shell_layout = QHBoxLayout(top_toolbar)
         toolbar_shell_layout.setContentsMargins(5, 2, 5, 2)
-        toolbar_shell_layout.setSpacing(4)
+        toolbar_shell_layout.setSpacing(10)
+
+        toolbar_controls_panel = QWidget()
+        toolbar_controls_layout = QVBoxLayout(toolbar_controls_panel)
+        toolbar_controls_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_controls_layout.setSpacing(4)
 
         toolbar_primary_row = QHBoxLayout()
         toolbar_primary_row.setContentsMargins(0, 0, 0, 0)
         toolbar_primary_row.setSpacing(4)
-        toolbar_shell_layout.addLayout(toolbar_primary_row)
+        toolbar_controls_layout.addLayout(toolbar_primary_row)
+        toolbar_controls_layout.addStretch()
+
+        toolbar_actions_panel = QWidget()
+        toolbar_actions_layout = QVBoxLayout(toolbar_actions_panel)
+        toolbar_actions_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_actions_layout.setSpacing(4)
 
         toolbar_secondary_row = QHBoxLayout()
         toolbar_secondary_row.setContentsMargins(0, 0, 0, 0)
         toolbar_secondary_row.setSpacing(4)
-        toolbar_shell_layout.addLayout(toolbar_secondary_row)
+        toolbar_secondary_row.addStretch()
+        toolbar_actions_layout.addLayout(toolbar_secondary_row)
 
         toolbar_tertiary_row = QHBoxLayout()
         toolbar_tertiary_row.setContentsMargins(0, 0, 0, 0)
         toolbar_tertiary_row.setSpacing(4)
-        toolbar_shell_layout.addLayout(toolbar_tertiary_row)
+        toolbar_tertiary_row.addStretch()
+        toolbar_actions_layout.addLayout(toolbar_tertiary_row)
+
+        toolbar_shell_layout.addWidget(toolbar_controls_panel, 3)
+        toolbar_shell_layout.addWidget(toolbar_actions_panel, 2, Qt.AlignTop)
 
         toolbar_layout = toolbar_primary_row
         
@@ -965,6 +981,20 @@ class InpaintingMaskEditor(QDialog):
                 background-color: #7a5d5d;
             }
         """
+        buffer_button_style = """
+            QPushButton {
+                background-color: #6d6948;
+                color: #ffffff;
+                font-weight: 600;
+                font-size: 12px;
+                border: 1px solid #91895e;
+                border-radius: 4px;
+                padding: 3px 8px;
+            }
+            QPushButton:hover {
+                background-color: #817b55;
+            }
+        """
         edge_button_style = """
             QPushButton {
                 background-color: #4c6654;
@@ -1045,24 +1075,23 @@ class InpaintingMaskEditor(QDialog):
         )
         toolbar_layout.addWidget(self.connect_distance_spinner)
 
-        toolbar_secondary_row.addStretch()
         toolbar_layout = toolbar_tertiary_row
 
         sep_cleanup_group = QFrame()
         sep_cleanup_group.setVisible(False)
-        self.cleanup_section_label = QLabel("Cleanup")
+        self.cleanup_section_label = QLabel("Largest")
         self.cleanup_section_label.setStyleSheet(section_label_style)
         toolbar_layout.addWidget(self.cleanup_section_label)
 
-        self.keep_largest_mask_frame_btn = QPushButton("Largest")
-        self.keep_largest_mask_frame_btn.setMinimumWidth(72)
+        self.keep_largest_mask_frame_btn = QPushButton("Frame")
+        self.keep_largest_mask_frame_btn.setMinimumWidth(56)
         self.keep_largest_mask_frame_btn.setToolTip("Cleanup: keep only largest mask on current frame")
         self.keep_largest_mask_frame_btn.clicked.connect(self.keep_largest_mask_current_frame)
         self.keep_largest_mask_frame_btn.setStyleSheet(cleanup_button_style)
         toolbar_layout.addWidget(self.keep_largest_mask_frame_btn)
 
-        self.keep_largest_masks_btn = QPushButton("Largest All")
-        self.keep_largest_masks_btn.setMinimumWidth(92)
+        self.keep_largest_masks_btn = QPushButton("All")
+        self.keep_largest_masks_btn.setMinimumWidth(48)
         self.keep_largest_masks_btn.setToolTip("Cleanup: keep only largest mask on all keyframes")
         self.keep_largest_masks_btn.clicked.connect(self.keep_largest_mask_all_keyframes)
         self.keep_largest_masks_btn.setStyleSheet(cleanup_button_style)
@@ -1072,12 +1101,19 @@ class InpaintingMaskEditor(QDialog):
         self.edge_section_label.setStyleSheet(section_label_style)
         toolbar_layout.addWidget(self.edge_section_label)
 
-        self.expand_edge_btn = QPushButton("Snap Edge")
-        self.expand_edge_btn.setMinimumWidth(82)
+        self.expand_edge_btn = QPushButton("Frame")
+        self.expand_edge_btn.setMinimumWidth(56)
         self.expand_edge_btn.setToolTip("Expand the current mask to any viewer edge that is already within the threshold")
         self.expand_edge_btn.clicked.connect(self.expand_mask_to_edges_current_frame)
         self.expand_edge_btn.setStyleSheet(edge_button_style)
         toolbar_layout.addWidget(self.expand_edge_btn)
+
+        self.expand_edge_all_btn = QPushButton("All")
+        self.expand_edge_all_btn.setMinimumWidth(48)
+        self.expand_edge_all_btn.setToolTip("Expand every mask in the sequence to any edge that is already within the threshold")
+        self.expand_edge_all_btn.clicked.connect(self.expand_mask_to_edges_all_frames)
+        self.expand_edge_all_btn.setStyleSheet(edge_button_style)
+        toolbar_layout.addWidget(self.expand_edge_all_btn)
 
         self.edge_snap_label = QLabel("Edge %")
         self.edge_snap_label.setToolTip("If mask pixels are within this percent of an edge, extend them to that edge")
@@ -1094,6 +1130,40 @@ class InpaintingMaskEditor(QDialog):
             lambda value: self.settings.setValue('mask_editor_edge_snap_percent', int(value))
         )
         toolbar_layout.addWidget(self.edge_snap_spinner)
+
+        self.buffer_section_label = QLabel("Buffer")
+        self.buffer_section_label.setStyleSheet(section_label_style)
+        toolbar_layout.addWidget(self.buffer_section_label)
+
+        self.buffer_mask_btn = QPushButton("Frame")
+        self.buffer_mask_btn.setMinimumWidth(56)
+        self.buffer_mask_btn.setToolTip("Grow the current mask by the buffer percentage without crossing the frame edge")
+        self.buffer_mask_btn.clicked.connect(self.buffer_mask_current_frame)
+        self.buffer_mask_btn.setStyleSheet(buffer_button_style)
+        toolbar_layout.addWidget(self.buffer_mask_btn)
+
+        self.buffer_masks_all_btn = QPushButton("All")
+        self.buffer_masks_all_btn.setMinimumWidth(48)
+        self.buffer_masks_all_btn.setToolTip("Grow every mask in the sequence by the buffer percentage without crossing the frame edge")
+        self.buffer_masks_all_btn.clicked.connect(self.buffer_mask_all_frames)
+        self.buffer_masks_all_btn.setStyleSheet(buffer_button_style)
+        toolbar_layout.addWidget(self.buffer_masks_all_btn)
+
+        self.buffer_percent_label = QLabel("Buffer %")
+        self.buffer_percent_label.setToolTip("Grow the mask by this percent of the shorter frame dimension")
+        toolbar_layout.addWidget(self.buffer_percent_label)
+
+        self.buffer_percent_spinner = QSpinBox()
+        self.buffer_percent_spinner.setRange(0, 25)
+        self.buffer_percent_spinner.setSingleStep(1)
+        self.buffer_percent_spinner.setSuffix("%")
+        self.buffer_percent_spinner.setMaximumWidth(68)
+        saved_buffer_percent = self.settings.value('mask_editor_buffer_percent', 2, type=int)
+        self.buffer_percent_spinner.setValue(saved_buffer_percent)
+        self.buffer_percent_spinner.valueChanged.connect(
+            lambda value: self.settings.setValue('mask_editor_buffer_percent', int(value))
+        )
+        toolbar_layout.addWidget(self.buffer_percent_spinner)
         
         # Bake liquify button (only visible in liquify mode)
         self.bake_liquify_btn = QPushButton("Bake Liquify")
@@ -1103,8 +1173,6 @@ class InpaintingMaskEditor(QDialog):
         self.bake_liquify_btn.setVisible(False)  # Hidden by default
         toolbar_layout.addWidget(self.bake_liquify_btn)
 
-        toolbar_tertiary_row.addStretch()
-        
         main_layout.addWidget(top_toolbar)
         
         # Main content area with tools and video views
@@ -2107,18 +2175,100 @@ class InpaintingMaskEditor(QDialog):
 
         return len(generated_frames)
 
+    def _reset_liquify_preview_state(self):
+        if self.drawing_mode != "liquify":
+            return
+        self.mask_widget.liquify_deformation_field = None
+        self.mask_widget.liquify_original_shapes = None
+        self.mask_widget._temp_deformed_shapes = None
+        self.mask_widget.is_liquifying = False
+
+    def _buffer_mask_by_percent(self, mask, buffer_percent):
+        if mask is None:
+            return None
+
+        buffered = mask.copy()
+        if buffered.ndim != 2 or buffered.size == 0:
+            return buffered
+
+        buffer_percent = max(0.0, float(buffer_percent))
+        if buffer_percent <= 0:
+            return buffered
+
+        h, w = buffered.shape
+        radius = int(np.ceil(min(h, w) * (buffer_percent / 100.0)))
+        if radius <= 0:
+            return buffered
+
+        kernel_size = max(3, (radius * 2) + 1)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        return cv2.dilate(buffered, kernel, iterations=1)
+
+    def _collect_mask_updates(self, frame_indices, transform_fn):
+        updates = []
+        details = []
+
+        for frame_index in frame_indices:
+            if frame_index < 0 or frame_index >= len(self.mask_frames):
+                continue
+
+            source_mask = self.mask_frames[frame_index]
+            if source_mask is None or not np.any(source_mask > 0):
+                continue
+
+            transformed_mask, detail = transform_fn(source_mask.copy(), frame_index)
+            if transformed_mask is None or np.array_equal(transformed_mask, source_mask):
+                continue
+
+            updates.append((frame_index, transformed_mask))
+            if detail:
+                details.append(detail)
+
+        return updates, details
+
+    def _apply_mask_updates(self, updates, action_label):
+        if not updates:
+            return 0
+
+        shape_mode = self.drawing_mode in ["shape", "liquify"]
+        affected_frames = [frame_index for frame_index, _ in updates]
+        self.mask_widget.save_undo_state(
+            action_label,
+            full_snapshot=shape_mode,
+            affected_frames=affected_frames,
+        )
+
+        if shape_mode:
+            self._reset_liquify_preview_state()
+            if not hasattr(self.mask_widget, 'shape_keyframes'):
+                self.mask_widget.shape_keyframes = {}
+
+        for frame_index, transformed_mask in updates:
+            self.mask_frames[frame_index] = transformed_mask
+            if shape_mode:
+                self.mask_widget.shape_keyframes[frame_index] = self._shape_keyframes_from_mask(transformed_mask)
+
+        if shape_mode:
+            self.mask_widget.invalidate_shape_cache()
+
+        current_frame = self.current_frame_index
+        self.mask_widget.set_mask(self.mask_frames[current_frame], self.video_frames[current_frame])
+        if shape_mode:
+            self.mask_widget.update_mask_from_shapes()
+
+        self.update_mask_frame_tracking()
+        self.update_display()
+        self.mask_widget.setFocus()
+        return len(updates)
+
     def expand_mask_to_edges_current_frame(self):
         threshold_percent = int(self.edge_snap_spinner.value()) if hasattr(self, 'edge_snap_spinner') else 10
         frame_index = self.current_frame_index
-        shape_mode = self.drawing_mode in ["shape", "liquify"]
-
-        source_mask = self.mask_frames[frame_index].copy()
-        if not np.any(source_mask > 0):
-            QMessageBox.information(self, "No Mask", "Current frame does not contain any mask pixels to expand.")
-            return
-
-        expanded_mask, touched_edges = self._expand_mask_to_near_edges(source_mask, threshold_percent)
-        if expanded_mask is None or not touched_edges:
+        updates, details = self._collect_mask_updates(
+            [frame_index],
+            lambda source_mask, _: self._expand_mask_to_near_edges(source_mask, threshold_percent),
+        )
+        if not updates:
             QMessageBox.information(
                 self,
                 "No Edge Snap",
@@ -2126,39 +2276,76 @@ class InpaintingMaskEditor(QDialog):
             )
             return
 
-        self.mask_widget.save_undo_state(
-            "Snap mask to edges",
-            full_snapshot=shape_mode,
-            affected_frames=[frame_index],
-        )
+        self._apply_mask_updates(updates, "Snap mask to edges")
 
-        if shape_mode:
-            if self.drawing_mode == "liquify":
-                self.mask_widget.liquify_deformation_field = None
-                self.mask_widget.liquify_original_shapes = None
-                self.mask_widget._temp_deformed_shapes = None
-                self.mask_widget.is_liquifying = False
-
-            if not hasattr(self.mask_widget, 'shape_keyframes'):
-                self.mask_widget.shape_keyframes = {}
-            self.mask_widget.shape_keyframes[frame_index] = self._shape_keyframes_from_mask(expanded_mask)
-            self.mask_widget.invalidate_shape_cache()
-            self.mask_frames[frame_index] = expanded_mask
-            self.mask_widget.set_mask(self.mask_frames[frame_index], self.video_frames[frame_index])
-            self.mask_widget.update_mask_from_shapes()
-        else:
-            self.mask_frames[frame_index] = expanded_mask
-            self.mask_widget.set_mask(self.mask_frames[frame_index], self.video_frames[frame_index])
-
-        self.update_mask_frame_tracking()
-        self.update_display()
-        self.mask_widget.setFocus()
-
-        edge_list = ", ".join(touched_edges)
+        edge_list = ", ".join(details[0]) if details else "selected"
         QMessageBox.information(
             self,
             "Mask Snapped",
             f"Expanded the current mask to the {edge_list} edge(s) using a {threshold_percent}% threshold."
+        )
+
+    def expand_mask_to_edges_all_frames(self):
+        threshold_percent = int(self.edge_snap_spinner.value()) if hasattr(self, 'edge_snap_spinner') else 10
+        updates, _ = self._collect_mask_updates(
+            range(len(self.mask_frames)),
+            lambda source_mask, _: self._expand_mask_to_near_edges(source_mask, threshold_percent),
+        )
+        if not updates:
+            QMessageBox.information(
+                self,
+                "No Edge Snap",
+                f"No mask pixels were within {threshold_percent}% of the frame edges on any frame."
+            )
+            return
+
+        changed_frames = self._apply_mask_updates(updates, "Snap masks to edges (all frames)")
+        QMessageBox.information(
+            self,
+            "Masks Snapped",
+            f"Expanded masks to nearby edges on {changed_frames} frame(s) using a {threshold_percent}% threshold."
+        )
+
+    def buffer_mask_current_frame(self):
+        buffer_percent = int(self.buffer_percent_spinner.value()) if hasattr(self, 'buffer_percent_spinner') else 2
+        updates, _ = self._collect_mask_updates(
+            [self.current_frame_index],
+            lambda source_mask, _: (self._buffer_mask_by_percent(source_mask, buffer_percent), True),
+        )
+        if not updates:
+            QMessageBox.information(
+                self,
+                "No Buffer Applied",
+                "Current frame does not contain any mask pixels to buffer."
+            )
+            return
+
+        self._apply_mask_updates(updates, "Buffer mask")
+        QMessageBox.information(
+            self,
+            "Mask Buffered",
+            f"Grew the current mask by {buffer_percent}%."
+        )
+
+    def buffer_mask_all_frames(self):
+        buffer_percent = int(self.buffer_percent_spinner.value()) if hasattr(self, 'buffer_percent_spinner') else 2
+        updates, _ = self._collect_mask_updates(
+            range(len(self.mask_frames)),
+            lambda source_mask, _: (self._buffer_mask_by_percent(source_mask, buffer_percent), True),
+        )
+        if not updates:
+            QMessageBox.information(
+                self,
+                "No Buffer Applied",
+                "No frames contained mask pixels to buffer."
+            )
+            return
+
+        changed_frames = self._apply_mask_updates(updates, "Buffer masks (all frames)")
+        QMessageBox.information(
+            self,
+            "Masks Buffered",
+            f"Grew masks by {buffer_percent}% on {changed_frames} frame(s)."
         )
         
     def clear_all_frames(self):
