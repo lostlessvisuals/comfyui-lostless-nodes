@@ -2256,6 +2256,8 @@ def main():
                 else:
                     print(f"[ComfyUI Mask Editor] ERROR: editor.mask_widget not found!")
 
+            bootstrapped_keyframes = 0
+
             # Restore raster mask frames (Comfy-driven path)
             if "mask_frames" in project:
                 try:
@@ -2295,6 +2297,20 @@ def main():
                             editor.drawing_mode = 'brush'
                             editor.update_mask_frame_tracking()
                             editor.drawing_mode = original_mode
+                    if (
+                        restored_masks > 0 and
+                        hasattr(editor, 'bootstrap_shape_keyframes_from_masks') and
+                        hasattr(editor, 'mask_widget')
+                    ):
+                        preferred_vertex_count = int(project_settings.get("vertex_count", 150))
+                        bootstrapped_keyframes = editor.bootstrap_shape_keyframes_from_masks(
+                            target_vertices=preferred_vertex_count
+                        )
+                        if bootstrapped_keyframes > 0:
+                            print(
+                                f"[ComfyUI Mask Editor] Bootstrapped {bootstrapped_keyframes} "
+                                "shape keyframe(s) from restored raster masks"
+                            )
                     print(f"[ComfyUI Mask Editor] Restored raster masks: restored={restored_masks}, skipped={skipped_masks}, frame_buffer={len(editor.mask_frames) if hasattr(editor, 'mask_frames') else 'n/a'}")
                 except Exception as mask_restore_error:
                     print(f"[ComfyUI Mask Editor] Failed restoring raster masks: {mask_restore_error}")
@@ -2306,6 +2322,10 @@ def main():
                     editor.on_frame_changed(editor.current_frame_index)
 
             if project_settings:
+                if bootstrapped_keyframes > 0 and project_settings.get("drawing_mode", "brush") == "brush":
+                    project_settings = dict(project_settings)
+                    project_settings["drawing_mode"] = "shape"
+
                 settings_mode = project_settings.get("drawing_mode")
                 if settings_mode and hasattr(editor, 'initial_mode'):
                     editor.initial_mode = settings_mode
@@ -2324,9 +2344,16 @@ def main():
                     editor.vertex_count_slider.blockSignals(False)
                     if hasattr(editor, 'apply_vertex_count_setting'):
                         editor.apply_vertex_count_setting(vertex_count, persist_setting=False)
+            elif bootstrapped_keyframes > 0 and hasattr(editor, 'initial_mode'):
+                editor.initial_mode = "shape"
+                if hasattr(editor, 'mask_widget'):
+                    editor.mask_widget._last_brush_mode = "shape"
                     
             if "drawing_mode" in project and hasattr(editor, 'set_drawing_mode'):
-                editor.set_drawing_mode(project["drawing_mode"])
+                drawing_mode = project["drawing_mode"]
+                if bootstrapped_keyframes > 0 and drawing_mode == "brush":
+                    drawing_mode = "shape"
+                editor.set_drawing_mode(drawing_mode)
                 
             if "current_project_path" in project:
                 editor.current_project_path = project["current_project_path"]

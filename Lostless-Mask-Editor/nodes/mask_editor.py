@@ -586,11 +586,28 @@ class InpaintingMaskEditor(QDialog):
         
         # Top toolbar (compact)
         top_toolbar = QWidget()
-        top_toolbar.setMinimumHeight(66)
-        top_toolbar.setMaximumHeight(110)
-        toolbar_layout = QHBoxLayout(top_toolbar)
-        toolbar_layout.setContentsMargins(5, 2, 5, 2)
-        toolbar_layout.setSpacing(4)
+        top_toolbar.setMinimumHeight(126)
+        top_toolbar.setMaximumHeight(190)
+        toolbar_shell_layout = QVBoxLayout(top_toolbar)
+        toolbar_shell_layout.setContentsMargins(5, 2, 5, 2)
+        toolbar_shell_layout.setSpacing(4)
+
+        toolbar_primary_row = QHBoxLayout()
+        toolbar_primary_row.setContentsMargins(0, 0, 0, 0)
+        toolbar_primary_row.setSpacing(4)
+        toolbar_shell_layout.addLayout(toolbar_primary_row)
+
+        toolbar_secondary_row = QHBoxLayout()
+        toolbar_secondary_row.setContentsMargins(0, 0, 0, 0)
+        toolbar_secondary_row.setSpacing(4)
+        toolbar_shell_layout.addLayout(toolbar_secondary_row)
+
+        toolbar_tertiary_row = QHBoxLayout()
+        toolbar_tertiary_row.setContentsMargins(0, 0, 0, 0)
+        toolbar_tertiary_row.setSpacing(4)
+        toolbar_shell_layout.addLayout(toolbar_tertiary_row)
+
+        toolbar_layout = toolbar_primary_row
         
         # Create tool button style (dark theme)
         tool_button_style = """
@@ -898,6 +915,9 @@ class InpaintingMaskEditor(QDialog):
         self.lattice_size_label.setMinimumWidth(25)
         self.lattice_size_label.setVisible(False)  # Hidden by default
         toolbar_layout.addWidget(self.lattice_size_label)
+
+        toolbar_primary_row.addStretch()
+        toolbar_layout = toolbar_secondary_row
         
         # Separator
         sep2 = QFrame()
@@ -968,21 +988,21 @@ class InpaintingMaskEditor(QDialog):
             }
         """
         
-        clear_section_label = QLabel("Clear")
-        clear_section_label.setStyleSheet(section_label_style)
-        toolbar_layout.addWidget(clear_section_label)
+        self.clear_section_label = QLabel("Clear")
+        self.clear_section_label.setStyleSheet(section_label_style)
+        toolbar_layout.addWidget(self.clear_section_label)
 
         # Clear current frame button
-        self.clear_btn = QPushButton("Mask")
-        self.clear_btn.setMinimumWidth(58)
+        self.clear_btn = QPushButton("Frame")
+        self.clear_btn.setMinimumWidth(56)
         self.clear_btn.clicked.connect(self.clear_current_frame)
         self.clear_btn.setToolTip("Clear: current frame mask only")
         self.clear_btn.setStyleSheet(clear_button_style)
         toolbar_layout.addWidget(self.clear_btn)
         
         # Clear all frames button
-        self.clear_all_btn = QPushButton("All Masks")
-        self.clear_all_btn.setMinimumWidth(74)
+        self.clear_all_btn = QPushButton("All")
+        self.clear_all_btn.setMinimumWidth(48)
         self.clear_all_btn.clicked.connect(self.clear_all_frames)
         self.clear_all_btn.setToolTip("Clear: all frame masks (confirmation required)")
         self.clear_all_btn.setStyleSheet(clear_button_style)
@@ -991,26 +1011,26 @@ class InpaintingMaskEditor(QDialog):
         # Visual separation between clear and connect groups
         sep_connect_group = QFrame()
         sep_connect_group.setVisible(False)
-        connect_section_label = QLabel("Connect")
-        connect_section_label.setStyleSheet(section_label_style)
-        toolbar_layout.addWidget(connect_section_label)
+        self.connect_section_label = QLabel("Connect")
+        self.connect_section_label.setStyleSheet(section_label_style)
+        toolbar_layout.addWidget(self.connect_section_label)
         
         # Connect floating masks button (shape/liquify modes)
-        self.connect_masks_btn = QPushButton("Mask")
-        self.connect_masks_btn.setMinimumWidth(58)
+        self.connect_masks_btn = QPushButton("Frame")
+        self.connect_masks_btn.setMinimumWidth(56)
         self.connect_masks_btn.setToolTip("Connect: floating masks on current frame")
         self.connect_masks_btn.clicked.connect(self.connect_floating_masks_current_frame)
         self.connect_masks_btn.setStyleSheet(connect_button_style)
         toolbar_layout.addWidget(self.connect_masks_btn)
 
-        self.connect_masks_all_btn = QPushButton("All Masks")
-        self.connect_masks_all_btn.setMinimumWidth(74)
+        self.connect_masks_all_btn = QPushButton("All")
+        self.connect_masks_all_btn.setMinimumWidth(48)
         self.connect_masks_all_btn.setToolTip("Connect: floating masks on all keyframes")
         self.connect_masks_all_btn.clicked.connect(self.connect_floating_masks_all_frames)
         self.connect_masks_all_btn.setStyleSheet(connect_button_style)
         toolbar_layout.addWidget(self.connect_masks_all_btn)
 
-        self.connect_distance_label = QLabel("Max Distance (%)")
+        self.connect_distance_label = QLabel("Gap %")
         self.connect_distance_label.setToolTip("Maximum distance threshold for connecting floating masks (percent of frame diagonal)")
         toolbar_layout.addWidget(self.connect_distance_label)
         
@@ -1025,38 +1045,41 @@ class InpaintingMaskEditor(QDialog):
         )
         toolbar_layout.addWidget(self.connect_distance_spinner)
 
+        toolbar_secondary_row.addStretch()
+        toolbar_layout = toolbar_tertiary_row
+
         sep_cleanup_group = QFrame()
         sep_cleanup_group.setVisible(False)
-        cleanup_section_label = QLabel("Cleanup")
-        cleanup_section_label.setStyleSheet(section_label_style)
-        toolbar_layout.addWidget(cleanup_section_label)
+        self.cleanup_section_label = QLabel("Cleanup")
+        self.cleanup_section_label.setStyleSheet(section_label_style)
+        toolbar_layout.addWidget(self.cleanup_section_label)
 
-        self.keep_largest_mask_frame_btn = QPushButton("Keep Largest Mask")
-        self.keep_largest_mask_frame_btn.setMinimumWidth(118)
+        self.keep_largest_mask_frame_btn = QPushButton("Largest")
+        self.keep_largest_mask_frame_btn.setMinimumWidth(72)
         self.keep_largest_mask_frame_btn.setToolTip("Cleanup: keep only largest mask on current frame")
         self.keep_largest_mask_frame_btn.clicked.connect(self.keep_largest_mask_current_frame)
         self.keep_largest_mask_frame_btn.setStyleSheet(cleanup_button_style)
         toolbar_layout.addWidget(self.keep_largest_mask_frame_btn)
 
-        self.keep_largest_masks_btn = QPushButton("Keep All Largest Masks")
-        self.keep_largest_masks_btn.setMinimumWidth(138)
+        self.keep_largest_masks_btn = QPushButton("Largest All")
+        self.keep_largest_masks_btn.setMinimumWidth(92)
         self.keep_largest_masks_btn.setToolTip("Cleanup: keep only largest mask on all keyframes")
         self.keep_largest_masks_btn.clicked.connect(self.keep_largest_mask_all_keyframes)
         self.keep_largest_masks_btn.setStyleSheet(cleanup_button_style)
         toolbar_layout.addWidget(self.keep_largest_masks_btn)
 
-        edge_section_label = QLabel("Edge")
-        edge_section_label.setStyleSheet(section_label_style)
-        toolbar_layout.addWidget(edge_section_label)
+        self.edge_section_label = QLabel("Edge")
+        self.edge_section_label.setStyleSheet(section_label_style)
+        toolbar_layout.addWidget(self.edge_section_label)
 
-        self.expand_edge_btn = QPushButton("Snap Mask")
-        self.expand_edge_btn.setMinimumWidth(84)
+        self.expand_edge_btn = QPushButton("Snap Edge")
+        self.expand_edge_btn.setMinimumWidth(82)
         self.expand_edge_btn.setToolTip("Expand the current mask to any viewer edge that is already within the threshold")
         self.expand_edge_btn.clicked.connect(self.expand_mask_to_edges_current_frame)
         self.expand_edge_btn.setStyleSheet(edge_button_style)
         toolbar_layout.addWidget(self.expand_edge_btn)
 
-        self.edge_snap_label = QLabel("Threshold")
+        self.edge_snap_label = QLabel("Edge %")
         self.edge_snap_label.setToolTip("If mask pixels are within this percent of an edge, extend them to that edge")
         toolbar_layout.addWidget(self.edge_snap_label)
 
@@ -1079,8 +1102,8 @@ class InpaintingMaskEditor(QDialog):
         self.bake_liquify_btn.setToolTip("Apply liquify deformation permanently and reset the lattice")
         self.bake_liquify_btn.setVisible(False)  # Hidden by default
         toolbar_layout.addWidget(self.bake_liquify_btn)
-        
-        toolbar_layout.addStretch()
+
+        toolbar_tertiary_row.addStretch()
         
         main_layout.addWidget(top_toolbar)
         
@@ -1428,8 +1451,10 @@ class InpaintingMaskEditor(QDialog):
         self.vertex_count_slider.setVisible(mode == "shape")  # Only for shape mode
         self.vertex_count_label.setVisible(mode == "shape")  # Only for shape mode
         self.vertex_sep.setVisible(mode == "shape")  # Only for shape mode
+        self.connect_section_label.setVisible(is_shape_mode)
         self.connect_masks_btn.setVisible(is_shape_mode)
         self.connect_masks_all_btn.setVisible(is_shape_mode)
+        self.cleanup_section_label.setVisible(is_shape_mode)
         self.keep_largest_mask_frame_btn.setVisible(is_shape_mode)
         self.keep_largest_masks_btn.setVisible(is_shape_mode)
         self.connect_distance_label.setVisible(is_shape_mode)
@@ -2018,13 +2043,15 @@ class InpaintingMaskEditor(QDialog):
 
         return expanded, touched_edges
 
-    def _shape_keyframes_from_mask(self, mask):
+    def _shape_keyframes_from_mask(self, mask, target_vertices=None):
         if mask is None or mask.ndim != 2:
             return []
 
         binary_mask = np.where(mask > 0, 255, 0).astype(np.uint8)
         contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        target_vertices = int(self.vertex_count_slider.value()) if hasattr(self, 'vertex_count_slider') else 150
+        if target_vertices is None:
+            target_vertices = int(self.vertex_count_slider.value()) if hasattr(self, 'vertex_count_slider') else 150
+        target_vertices = max(8, int(target_vertices))
         shapes = []
 
         for contour in contours:
@@ -2047,6 +2074,38 @@ class InpaintingMaskEditor(QDialog):
             })
 
         return shapes
+
+    def bootstrap_shape_keyframes_from_masks(self, target_vertices=None, frame_indices=None):
+        if not hasattr(self.mask_widget, 'shape_keyframes'):
+            self.mask_widget.shape_keyframes = {}
+
+        if target_vertices is None:
+            target_vertices = int(self.vertex_count_slider.value()) if hasattr(self, 'vertex_count_slider') else 150
+
+        if frame_indices is None:
+            frame_indices = range(len(self.mask_frames))
+
+        generated_frames = []
+        for frame_index in frame_indices:
+            if frame_index < 0 or frame_index >= len(self.mask_frames):
+                continue
+            if self.mask_widget.shape_keyframes.get(frame_index):
+                continue
+
+            frame_mask = self.mask_frames[frame_index]
+            if frame_mask is None or not np.any(frame_mask > 0):
+                continue
+
+            generated_shapes = self._shape_keyframes_from_mask(frame_mask, target_vertices=target_vertices)
+            if generated_shapes:
+                self.mask_widget.shape_keyframes[frame_index] = generated_shapes
+                generated_frames.append(frame_index)
+
+        if generated_frames:
+            self.mask_widget.invalidate_shape_cache()
+            self.update_mask_frame_tracking()
+
+        return len(generated_frames)
 
     def expand_mask_to_edges_current_frame(self):
         threshold_percent = int(self.edge_snap_spinner.value()) if hasattr(self, 'edge_snap_spinner') else 10
@@ -2881,6 +2940,8 @@ class InpaintingMaskEditor(QDialog):
                 progress.setValue(60)
                 QApplication.processEvents()
 
+            loaded_vertex_count = int(project_data.get('vertex_count', 150))
+
             # Load shape keyframes
             shape_keyframes_data = project_data.get('shape_keyframes', {})
             total_keyframes = len(shape_keyframes_data)
@@ -2913,16 +2974,25 @@ class InpaintingMaskEditor(QDialog):
                 QApplication.processEvents()
 
             # Restore UI state
-            loaded_vertex_count = int(project_data.get('vertex_count', 150))
             self.vertex_count_slider.blockSignals(True)
             self.vertex_count_slider.setValue(loaded_vertex_count)
             self.vertex_count_slider.blockSignals(False)
             self.apply_vertex_count_setting(loaded_vertex_count, persist_setting=True)
 
+            bootstrapped_keyframes = self.bootstrap_shape_keyframes_from_masks(target_vertices=loaded_vertex_count)
+            if bootstrapped_keyframes > 0:
+                progress_value[0] = max(progress_value[0], 82)
+                progress.setValue(progress_value[0])
+                QApplication.processEvents()
+
             # Force shapes to match loaded vertex count even when slider value is unchanged.
             self.normalize_shape_keyframes_to_target_vertices(loaded_vertex_count)
 
-            self.set_drawing_mode(project_data.get('drawing_mode', 'brush'))
+            drawing_mode = project_data.get('drawing_mode', 'brush')
+            if bootstrapped_keyframes > 0 and drawing_mode == 'brush':
+                drawing_mode = 'shape'
+
+            self.set_drawing_mode(drawing_mode)
             self.brush_size = project_data.get('brush_size', 20)
             self.brush_size_slider.setValue(self.brush_size)
             progress_value[0] = max(progress_value[0], 85)
@@ -7961,4 +8031,3 @@ class MaskDrawingWidget(QWidget):
         
         # Update the display
         self.update()
-
