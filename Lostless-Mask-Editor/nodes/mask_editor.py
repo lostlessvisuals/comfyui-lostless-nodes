@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QSpinBox, QDoubleSpinBox, QFileDialog, QProgressBar, QTextEdit,
                              QGroupBox, QMessageBox, QRadioButton, QButtonGroup, QSlider,
                              QMenu, QAction, QComboBox, QCheckBox, QScrollArea, QDialog,
-                             QGridLayout, QFrame)
+                             QGridLayout, QFrame, QSizePolicy, QBoxLayout)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSettings, QRect, QRectF, QTimer, QPoint, QPropertyAnimation, QEasingCurve, pyqtProperty
 from PyQt5.QtGui import QFont, QPainter, QColor, QPen, QBrush, QPixmap, QImage, QLinearGradient, QRadialGradient, QPainterPath, QCursor, QIcon
 import cv2
@@ -566,28 +566,42 @@ class InpaintingMaskEditor(QDialog):
         
     def init_ui(self):
         self.setWindowTitle(f"Mask Editor ({MASK_EDITOR_BUILD_TAG}) - Arrow keys: navigate, B: brush, Z: zoom, X: toggle paint/erase, Space+drag: pan")
-        
-        # Get screen geometry and center window at 70% of screen size
-        screen = QApplication.primaryScreen().geometry()
-        width = int(screen.width() * 0.7)
-        height = int(screen.height() * 0.7)
-        x = (screen.width() - width) // 2
-        y = (screen.height() - height) // 2
-        self.setGeometry(x, y, width, height)
+
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else QRect(0, 0, 1600, 900)
+        base_scale = min(available.width() / 1720.0, available.height() / 1080.0)
+        self._ui_scale = max(0.9, min(1.25, base_scale))
+
+        min_window_width = min(max(900, int(1040 * self._ui_scale)), available.width())
+        min_window_height = min(max(640, int(760 * self._ui_scale)), available.height())
+        initial_width = min(available.width(), max(min_window_width, int(available.width() * 0.94)))
+        initial_height = min(available.height(), max(min_window_height, int(available.height() * 0.92)))
+        x = available.x() + max(0, (available.width() - initial_width) // 2)
+        y = available.y() + max(0, (available.height() - initial_height) // 2)
+
+        self.setMinimumSize(min_window_width, min_window_height)
+        self.setGeometry(x, y, initial_width, initial_height)
         self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint | Qt.WindowSystemMenuHint)
         self.setSizeGripEnabled(True)
-        
+
+        tool_button_px = max(32, int(round(34 * self._ui_scale)))
+        compact_font_px = max(11, int(round(12 * self._ui_scale)))
+        mode_font_px = max(11, int(round(12 * self._ui_scale)))
+        button_padding_v = max(3, int(round(3 * self._ui_scale)))
+        button_padding_h = max(8, int(round(8 * self._ui_scale)))
+        wide_button_min_width = max(56, int(round(58 * self._ui_scale)))
+        compact_button_min_width = max(48, int(round(50 * self._ui_scale)))
+        compact_spin_width = max(56, int(round(66 * self._ui_scale)))
+
         # Enable keyboard shortcuts
         self.setFocusPolicy(Qt.StrongFocus)
-        
+
         # Main layout
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(5, 5, 5, 5)
-        
+
         # Top toolbar (compact)
         top_toolbar = QWidget()
-        top_toolbar.setMinimumHeight(88)
-        top_toolbar.setMaximumHeight(132)
         toolbar_shell_layout = QHBoxLayout(top_toolbar)
         toolbar_shell_layout.setContentsMargins(5, 2, 5, 2)
         toolbar_shell_layout.setSpacing(10)
@@ -611,30 +625,36 @@ class InpaintingMaskEditor(QDialog):
         toolbar_secondary_row = QHBoxLayout()
         toolbar_secondary_row.setContentsMargins(0, 0, 0, 0)
         toolbar_secondary_row.setSpacing(4)
-        toolbar_secondary_row.addStretch()
         toolbar_actions_layout.addLayout(toolbar_secondary_row)
 
         toolbar_tertiary_row = QHBoxLayout()
         toolbar_tertiary_row.setContentsMargins(0, 0, 0, 0)
         toolbar_tertiary_row.setSpacing(4)
-        toolbar_tertiary_row.addStretch()
         toolbar_actions_layout.addLayout(toolbar_tertiary_row)
 
-        toolbar_shell_layout.addWidget(toolbar_controls_panel, 3)
-        toolbar_shell_layout.addWidget(toolbar_actions_panel, 2, Qt.AlignTop)
+        toolbar_controls_panel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        toolbar_actions_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        toolbar_shell_layout.addWidget(toolbar_controls_panel, 0)
+        toolbar_shell_layout.addWidget(toolbar_actions_panel, 1, Qt.AlignTop)
+
+        self.top_toolbar = top_toolbar
+        self.toolbar_shell_layout = toolbar_shell_layout
+        self.toolbar_controls_panel = toolbar_controls_panel
+        self.toolbar_actions_panel = toolbar_actions_panel
 
         toolbar_layout = toolbar_primary_row
-        
+
         # Create tool button style (dark theme)
-        tool_button_style = """
+        tool_button_style = f"""
             QPushButton {
                 border: 1px solid #555;
                 border-radius: 4px;
                 padding: 4px;
-                min-width: 32px;
-                min-height: 32px;
-                max-width: 32px;
-                max-height: 32px;
+                min-width: {tool_button_px}px;
+                min-height: {tool_button_px}px;
+                max-width: {tool_button_px}px;
+                max-height: {tool_button_px}px;
                 background-color: #3a3a3a;
             }
             QPushButton:hover {
@@ -649,22 +669,22 @@ class InpaintingMaskEditor(QDialog):
                 background-color: #5ba0f2;
             }
         """
-        
+
         # Add a label to show current brush mode
-        mode_label_style = """
+        mode_label_style = f"""
             QLabel {
                 background-color: #333;
                 color: white;
                 padding: 2px 6px;
                 border-radius: 3px;
-                font-size: 12px;
+                font-size: {mode_font_px}px;
                 font-weight: bold;
             }
         """
-        
+
         # Left side tool panel
         tools_frame = QWidget()
-        tools_frame.setMaximumWidth(50)  # Slightly wider to accommodate mode label
+        tools_frame.setMaximumWidth(max(50, tool_button_px + 18))
         tools_frame.setStyleSheet("QWidget { background-color: #2d2d2d; border-right: 1px solid #555; }")
         tools_layout = QVBoxLayout(tools_frame)
         tools_layout.setContentsMargins(4, 4, 4, 4)
@@ -939,80 +959,80 @@ class InpaintingMaskEditor(QDialog):
         sep2 = QFrame()
         sep2.setVisible(False)
         
-        clear_button_style = """
+        clear_button_style = f"""
             QPushButton {
                 background-color: #595959;
                 color: #ffffff;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: {compact_font_px}px;
                 border: 1px solid #777;
                 border-radius: 4px;
-                padding: 3px 8px;
+                padding: {button_padding_v}px {button_padding_h}px;
             }
             QPushButton:hover {
                 background-color: #6b6b6b;
             }
         """
-        connect_button_style = """
+        connect_button_style = f"""
             QPushButton {
                 background-color: #4f6478;
                 color: #ffffff;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: {compact_font_px}px;
                 border: 1px solid #6f859a;
                 border-radius: 4px;
-                padding: 3px 8px;
+                padding: {button_padding_v}px {button_padding_h}px;
             }
             QPushButton:hover {
                 background-color: #5d7690;
             }
         """
-        cleanup_button_style = """
+        cleanup_button_style = f"""
             QPushButton {
                 background-color: #6a4f4f;
                 color: #ffffff;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: {compact_font_px}px;
                 border: 1px solid #8c6666;
                 border-radius: 4px;
-                padding: 3px 8px;
+                padding: {button_padding_v}px {button_padding_h}px;
             }
             QPushButton:hover {
                 background-color: #7a5d5d;
             }
         """
-        buffer_button_style = """
+        buffer_button_style = f"""
             QPushButton {
                 background-color: #6d6948;
                 color: #ffffff;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: {compact_font_px}px;
                 border: 1px solid #91895e;
                 border-radius: 4px;
-                padding: 3px 8px;
+                padding: {button_padding_v}px {button_padding_h}px;
             }
             QPushButton:hover {
                 background-color: #817b55;
             }
         """
-        edge_button_style = """
+        edge_button_style = f"""
             QPushButton {
                 background-color: #4c6654;
                 color: #ffffff;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: {compact_font_px}px;
                 border: 1px solid #6f8b77;
                 border-radius: 4px;
-                padding: 3px 8px;
+                padding: {button_padding_v}px {button_padding_h}px;
             }
             QPushButton:hover {
                 background-color: #597861;
             }
         """
-        section_label_style = """
+        section_label_style = f"""
             QLabel {
                 color: #cfcfcf;
-                font-size: 12px;
+                font-size: {compact_font_px}px;
                 font-weight: 600;
                 padding: 0 2px;
             }
@@ -1024,7 +1044,7 @@ class InpaintingMaskEditor(QDialog):
 
         # Clear current frame button
         self.clear_btn = QPushButton("Frame")
-        self.clear_btn.setMinimumWidth(56)
+        self.clear_btn.setMinimumWidth(wide_button_min_width)
         self.clear_btn.clicked.connect(self.clear_current_frame)
         self.clear_btn.setToolTip("Clear: current frame mask only")
         self.clear_btn.setStyleSheet(clear_button_style)
@@ -1032,7 +1052,7 @@ class InpaintingMaskEditor(QDialog):
         
         # Clear all frames button
         self.clear_all_btn = QPushButton("All")
-        self.clear_all_btn.setMinimumWidth(48)
+        self.clear_all_btn.setMinimumWidth(compact_button_min_width)
         self.clear_all_btn.clicked.connect(self.clear_all_frames)
         self.clear_all_btn.setToolTip("Clear: all frame masks (confirmation required)")
         self.clear_all_btn.setStyleSheet(clear_button_style)
@@ -1047,14 +1067,14 @@ class InpaintingMaskEditor(QDialog):
         
         # Connect floating masks button (shape/liquify modes)
         self.connect_masks_btn = QPushButton("Frame")
-        self.connect_masks_btn.setMinimumWidth(56)
+        self.connect_masks_btn.setMinimumWidth(wide_button_min_width)
         self.connect_masks_btn.setToolTip("Connect: floating masks on current frame")
         self.connect_masks_btn.clicked.connect(self.connect_floating_masks_current_frame)
         self.connect_masks_btn.setStyleSheet(connect_button_style)
         toolbar_layout.addWidget(self.connect_masks_btn)
 
         self.connect_masks_all_btn = QPushButton("All")
-        self.connect_masks_all_btn.setMinimumWidth(48)
+        self.connect_masks_all_btn.setMinimumWidth(compact_button_min_width)
         self.connect_masks_all_btn.setToolTip("Connect: floating masks on all keyframes")
         self.connect_masks_all_btn.clicked.connect(self.connect_floating_masks_all_frames)
         self.connect_masks_all_btn.setStyleSheet(connect_button_style)
@@ -1067,7 +1087,7 @@ class InpaintingMaskEditor(QDialog):
         self.connect_distance_spinner = QSpinBox()
         self.connect_distance_spinner.setRange(1, 100)
         self.connect_distance_spinner.setSingleStep(1)
-        self.connect_distance_spinner.setMaximumWidth(56)
+        self.connect_distance_spinner.setMaximumWidth(compact_spin_width)
         saved_connect_distance = self.settings.value('connect_mask_distance_percent', 20, type=int)
         self.connect_distance_spinner.setValue(saved_connect_distance)
         self.connect_distance_spinner.valueChanged.connect(
@@ -1084,14 +1104,14 @@ class InpaintingMaskEditor(QDialog):
         toolbar_layout.addWidget(self.cleanup_section_label)
 
         self.keep_largest_mask_frame_btn = QPushButton("Frame")
-        self.keep_largest_mask_frame_btn.setMinimumWidth(56)
+        self.keep_largest_mask_frame_btn.setMinimumWidth(wide_button_min_width)
         self.keep_largest_mask_frame_btn.setToolTip("Cleanup: keep only largest mask on current frame")
         self.keep_largest_mask_frame_btn.clicked.connect(self.keep_largest_mask_current_frame)
         self.keep_largest_mask_frame_btn.setStyleSheet(cleanup_button_style)
         toolbar_layout.addWidget(self.keep_largest_mask_frame_btn)
 
         self.keep_largest_masks_btn = QPushButton("All")
-        self.keep_largest_masks_btn.setMinimumWidth(48)
+        self.keep_largest_masks_btn.setMinimumWidth(compact_button_min_width)
         self.keep_largest_masks_btn.setToolTip("Cleanup: keep only largest mask on all keyframes")
         self.keep_largest_masks_btn.clicked.connect(self.keep_largest_mask_all_keyframes)
         self.keep_largest_masks_btn.setStyleSheet(cleanup_button_style)
@@ -1102,14 +1122,14 @@ class InpaintingMaskEditor(QDialog):
         toolbar_layout.addWidget(self.edge_section_label)
 
         self.expand_edge_btn = QPushButton("Frame")
-        self.expand_edge_btn.setMinimumWidth(56)
+        self.expand_edge_btn.setMinimumWidth(wide_button_min_width)
         self.expand_edge_btn.setToolTip("Expand the current mask to any viewer edge that is already within the threshold")
         self.expand_edge_btn.clicked.connect(self.expand_mask_to_edges_current_frame)
         self.expand_edge_btn.setStyleSheet(edge_button_style)
         toolbar_layout.addWidget(self.expand_edge_btn)
 
         self.expand_edge_all_btn = QPushButton("All")
-        self.expand_edge_all_btn.setMinimumWidth(48)
+        self.expand_edge_all_btn.setMinimumWidth(compact_button_min_width)
         self.expand_edge_all_btn.setToolTip("Expand every mask in the sequence to any edge that is already within the threshold")
         self.expand_edge_all_btn.clicked.connect(self.expand_mask_to_edges_all_frames)
         self.expand_edge_all_btn.setStyleSheet(edge_button_style)
@@ -1123,7 +1143,7 @@ class InpaintingMaskEditor(QDialog):
         self.edge_snap_spinner.setRange(0, 50)
         self.edge_snap_spinner.setSingleStep(1)
         self.edge_snap_spinner.setSuffix("%")
-        self.edge_snap_spinner.setMaximumWidth(68)
+        self.edge_snap_spinner.setMaximumWidth(max(68, int(round(76 * self._ui_scale))))
         saved_edge_snap = self.settings.value('mask_editor_edge_snap_percent', 10, type=int)
         self.edge_snap_spinner.setValue(saved_edge_snap)
         self.edge_snap_spinner.valueChanged.connect(
@@ -1136,14 +1156,14 @@ class InpaintingMaskEditor(QDialog):
         toolbar_layout.addWidget(self.buffer_section_label)
 
         self.buffer_mask_btn = QPushButton("Frame")
-        self.buffer_mask_btn.setMinimumWidth(56)
+        self.buffer_mask_btn.setMinimumWidth(wide_button_min_width)
         self.buffer_mask_btn.setToolTip("Grow the current mask by the buffer percentage without crossing the frame edge")
         self.buffer_mask_btn.clicked.connect(self.buffer_mask_current_frame)
         self.buffer_mask_btn.setStyleSheet(buffer_button_style)
         toolbar_layout.addWidget(self.buffer_mask_btn)
 
         self.buffer_masks_all_btn = QPushButton("All")
-        self.buffer_masks_all_btn.setMinimumWidth(48)
+        self.buffer_masks_all_btn.setMinimumWidth(compact_button_min_width)
         self.buffer_masks_all_btn.setToolTip("Grow every mask in the sequence by the buffer percentage without crossing the frame edge")
         self.buffer_masks_all_btn.clicked.connect(self.buffer_mask_all_frames)
         self.buffer_masks_all_btn.setStyleSheet(buffer_button_style)
@@ -1157,7 +1177,7 @@ class InpaintingMaskEditor(QDialog):
         self.buffer_percent_spinner.setRange(0, 25)
         self.buffer_percent_spinner.setSingleStep(1)
         self.buffer_percent_spinner.setSuffix("%")
-        self.buffer_percent_spinner.setMaximumWidth(68)
+        self.buffer_percent_spinner.setMaximumWidth(max(68, int(round(76 * self._ui_scale))))
         saved_buffer_percent = self.settings.value('mask_editor_buffer_percent', 2, type=int)
         self.buffer_percent_spinner.setValue(saved_buffer_percent)
         self.buffer_percent_spinner.valueChanged.connect(
@@ -1167,7 +1187,7 @@ class InpaintingMaskEditor(QDialog):
         
         # Bake liquify button (only visible in liquify mode)
         self.bake_liquify_btn = QPushButton("Bake Liquify")
-        self.bake_liquify_btn.setMaximumWidth(100)
+        self.bake_liquify_btn.setMaximumWidth(max(100, int(round(120 * self._ui_scale))))
         self.bake_liquify_btn.clicked.connect(self.bake_liquify)
         self.bake_liquify_btn.setToolTip("Apply liquify deformation permanently and reset the lattice")
         self.bake_liquify_btn.setVisible(False)  # Hidden by default
@@ -1193,7 +1213,8 @@ class InpaintingMaskEditor(QDialog):
         mask_layout = QVBoxLayout()
         mask_layout.setContentsMargins(5, 5, 5, 5)
         self.mask_widget = MaskDrawingWidget()
-        self.mask_widget.setMinimumSize(800, 600)  # Larger minimum size since it's the only view
+        self.mask_widget.setMinimumSize(420, 280)
+        self.mask_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.mask_widget.parent_editor = self  # Set parent reference for UI updates
         
         # Initialize mask widget with saved settings
@@ -1217,7 +1238,7 @@ class InpaintingMaskEditor(QDialog):
         
         # Custom timeline widget that shows mask indicators and supports scrubbing
         self.timeline_widget = MaskTimelineWidget()
-        self.timeline_widget.setFixedHeight(68)  # Slightly taller for better visibility
+        self.timeline_widget.setFixedHeight(max(64, int(round(70 * self._ui_scale))))
         self.timeline_widget.total_frames = len(self.video_frames)
         self.timeline_widget.current_frame = 0
         self.timeline_widget.mask_frames = set()  # Frames that have masks
@@ -1262,6 +1283,8 @@ class InpaintingMaskEditor(QDialog):
         self.loop_check.setChecked(True)
         self.loop_check.setToolTip("Loop playback when reaching end")
         timeline_layout.addWidget(self.loop_check)
+
+        self._apply_responsive_chrome()
 
         self.fullscreen_btn = QPushButton("Full Screen")
         self.fullscreen_btn.setToolTip("Toggle full screen view (F11)")
@@ -1830,6 +1853,9 @@ class InpaintingMaskEditor(QDialog):
         self.on_frame_changed(index)
     
     def on_frame_changed(self, index):
+        if index == self.current_frame_index:
+            return
+
         # Stop playback if user manually navigates to different frame (but not during automatic playback)
         if self.is_playing and hasattr(self, '_manual_navigation') and self._manual_navigation:
             self.pause_playback()
@@ -1865,6 +1891,8 @@ class InpaintingMaskEditor(QDialog):
                 print(f"Preserving liquify changes on frame {self.current_frame_index} before switching to frame {index}")
                 # Bake the current liquify deformations into the keyframe
                 self.mask_widget.bake_liquify_deformation()
+
+        self._propagate_active_brush_mask([index])
         
         self.current_frame_index = index
         # Frame change - shapes will be recalculated
@@ -1927,6 +1955,43 @@ class InpaintingMaskEditor(QDialog):
         
         # Update Apply to Current button state
         self.update_apply_button_state()
+
+    def _should_propagate_active_brush_mask(self):
+        return (
+            hasattr(self, "mask_widget") and
+            getattr(self.mask_widget, "is_drawing", False) and
+            getattr(self.mask_widget, "current_tool", None) == "brush" and
+            self.drawing_mode == "brush" and
+            self.mask_widget.mask is not None
+        )
+
+    def _propagate_active_brush_mask(self, frame_indices):
+        if not self._should_propagate_active_brush_mask():
+            return False
+
+        valid_frames = []
+        for frame_index in frame_indices:
+            try:
+                frame_i = int(frame_index)
+            except Exception:
+                continue
+            if 0 <= frame_i < len(self.mask_frames):
+                valid_frames.append(frame_i)
+
+        if not valid_frames:
+            return False
+
+        current_frame = int(self.current_frame_index)
+        self.mask_widget.begin_pixel_brush_transaction("Brush stroke")
+        self.mask_widget.capture_pixel_brush_frames([current_frame] + valid_frames)
+
+        current_mask = self.mask_widget.mask.copy()
+        self.mask_frames[current_frame] = current_mask.copy()
+        for frame_i in valid_frames:
+            self.mask_frames[frame_i] = current_mask.copy()
+
+        self.update_mask_frame_tracking()
+        return True
     
     def update_apply_button_state(self):
         """Update the Apply to Current button based on temporary shapes"""
@@ -3290,6 +3355,36 @@ class InpaintingMaskEditor(QDialog):
         """Restore editor state including shapes and mode"""
         # This method is now deprecated - state restoration happens directly in open_inpainting_mask_editor
         pass
+
+    def _apply_responsive_chrome(self):
+        if not hasattr(self, "top_toolbar") or not hasattr(self, "toolbar_shell_layout"):
+            return
+
+        width = max(1, self.width())
+        height = max(1, self.height())
+        scale = getattr(self, "_ui_scale", 1.0)
+        compact_toolbar = width < 1520 or (width < 1720 and height < 920)
+
+        if compact_toolbar:
+            self.toolbar_shell_layout.setDirection(QBoxLayout.TopToBottom)
+            self.toolbar_shell_layout.setStretch(0, 0)
+            self.toolbar_shell_layout.setStretch(1, 0)
+            self.top_toolbar.setMinimumHeight(max(110, int(round(126 * scale))))
+            self.top_toolbar.setMaximumHeight(max(182, int(round(198 * scale))))
+        else:
+            self.toolbar_shell_layout.setDirection(QBoxLayout.LeftToRight)
+            self.toolbar_shell_layout.setStretch(0, 0)
+            self.toolbar_shell_layout.setStretch(1, 1)
+            self.top_toolbar.setMinimumHeight(max(82, int(round(92 * scale))))
+            self.top_toolbar.setMaximumHeight(max(132, int(round(136 * scale))))
+
+        self.toolbar_controls_panel.setMaximumWidth(max(560, int(width * 0.46)))
+        self.toolbar_actions_panel.setMaximumWidth(16777215)
+        self.top_toolbar.updateGeometry()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_chrome()
     
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts"""
@@ -3872,6 +3967,7 @@ class MaskDrawingWidget(QWidget):
         self.undo_stack = []  # Stack of previous states
         self.redo_stack = []  # Stack of undone states
         self.max_undo_steps = 20  # Maximum number of undo steps to keep
+        self._pixel_brush_transaction = None
         
         # Performance optimization: defer expensive operations during initialization
         self._initializing = False
@@ -4050,6 +4146,98 @@ class MaskDrawingWidget(QWidget):
             state['previous_tool'] = None
             state['previous_mode'] = None
 
+    def begin_pixel_brush_transaction(self, description="Brush stroke"):
+        if self.parent_editor is None:
+            return
+
+        if self._pixel_brush_transaction is None:
+            self._pixel_brush_transaction = {
+                "description": description,
+                "affected_frames": [],
+                "mask_frames": {},
+            }
+        elif description:
+            self._pixel_brush_transaction["description"] = description
+
+        self.capture_pixel_brush_frames([self.parent_editor.current_frame_index])
+
+    def capture_pixel_brush_frames(self, frames):
+        if self.parent_editor is None:
+            return
+        if self._pixel_brush_transaction is None:
+            self.begin_pixel_brush_transaction()
+
+        transaction = self._pixel_brush_transaction
+        for frame in frames:
+            try:
+                frame_i = int(frame)
+            except Exception:
+                continue
+            if frame_i < 0 or frame_i >= len(self.parent_editor.mask_frames):
+                continue
+            if frame_i in transaction["mask_frames"]:
+                continue
+
+            transaction["mask_frames"][frame_i] = self.parent_editor.mask_frames[frame_i].copy()
+            transaction["affected_frames"].append(frame_i)
+
+        transaction["affected_frames"].sort()
+
+    def _push_undo_snapshot(self, state):
+        self.undo_stack.append(state)
+        if len(self.undo_stack) > self.max_undo_steps:
+            self.undo_stack.pop(0)
+        self.redo_stack.clear()
+        if self.parent_editor and hasattr(self.parent_editor, 'mark_unsaved_changes'):
+            self.parent_editor.mark_unsaved_changes()
+
+    def commit_pixel_brush_transaction(self):
+        transaction = self._pixel_brush_transaction
+        self._pixel_brush_transaction = None
+
+        if not transaction or self.parent_editor is None:
+            return False
+
+        affected_frames = transaction.get("affected_frames") or []
+        if not affected_frames:
+            return False
+
+        current_frame = int(self.parent_editor.current_frame_index)
+        if self.mask is not None and 0 <= current_frame < len(self.parent_editor.mask_frames):
+            self.parent_editor.mask_frames[current_frame] = self.mask.copy()
+
+        changed = False
+        for frame in affected_frames:
+            original_mask = transaction["mask_frames"].get(frame)
+            current_mask = self.parent_editor.mask_frames[frame]
+            if original_mask is None or current_mask is None:
+                continue
+            if not np.array_equal(current_mask, original_mask):
+                changed = True
+                break
+
+        if not changed:
+            return False
+
+        state = self._capture_state(
+            description=transaction.get("description", "Brush stroke"),
+            full_snapshot=False,
+            affected_frames=affected_frames,
+        )
+        state["mask_frames"] = {
+            frame: mask.copy() if mask is not None else None
+            for frame, mask in transaction["mask_frames"].items()
+        }
+
+        current_original = state["mask_frames"].get(current_frame)
+        if current_original is not None:
+            state["mask"] = current_original.copy()
+        state["frame"] = current_frame
+
+        self._push_undo_snapshot(state)
+        self.parent_editor.update_mask_frame_tracking()
+        return True
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             # Check for Alt modifier first for timeline scrubbing
@@ -4156,6 +4344,7 @@ class MaskDrawingWidget(QWidget):
                     else:
                         # Regular brush mode
                         self.is_drawing = True
+                        self.begin_pixel_brush_transaction("Brush stroke")
                         self.last_point = event.pos()
                         self.current_stroke_points = []  # Start new stroke
                         
@@ -4361,18 +4550,20 @@ class MaskDrawingWidget(QWidget):
                     action_performed = True
                 elif (self.parent_editor and self.parent_editor.fill_holes_check.isChecked() and 
                     self.drawing_mode == "brush" and len(self.current_stroke_points) > 10):
-                    # Save state before filling
-                    self.save_undo_state("Fill shape")
                     self.fill_closed_shape()
+                    self.commit_pixel_brush_transaction()
                     self.current_stroke_points = []  # Clear stroke points
                     action_performed = True
                 else:
                     # For regular brush strokes
                     if self.drawing_mode == "brush" and len(self.current_stroke_points) > 0:
-                        self.save_undo_state("Brush stroke")
+                        self.commit_pixel_brush_transaction()
                         action_performed = True
                     # Clear stroke points for regular brush mode
                     self.current_stroke_points = []
+
+                if self.drawing_mode == "brush" and not action_performed:
+                    self.commit_pixel_brush_transaction()
             elif self.selected_vertex_index is not None:
                 # Save state after warping vertex
                 self.save_undo_state("Warp vertex")
@@ -7949,6 +8140,7 @@ class MaskDrawingWidget(QWidget):
         """Capture undo/redo state with either full or scoped keyframe snapshots."""
         state = {
             'mask': self.mask.copy() if self.mask is not None else None,
+            'mask_frames': {},
             'shape_keyframes': {},
             'description': description,
             'frame': self.parent_editor.current_frame_index if self.parent_editor else 0,
@@ -7957,6 +8149,9 @@ class MaskDrawingWidget(QWidget):
         }
         
         if full_snapshot:
+            if self.parent_editor:
+                for frame_idx, frame_mask in enumerate(self.parent_editor.mask_frames):
+                    state['mask_frames'][int(frame_idx)] = frame_mask.copy() if frame_mask is not None else None
             for frame, shapes in self.shape_keyframes.items():
                 state['shape_keyframes'][frame] = [self._clone_shape(shape) for shape in shapes]
             return state
@@ -7964,6 +8159,11 @@ class MaskDrawingWidget(QWidget):
         frames = self._normalize_affected_frames(affected_frames)
         state['affected_frames'] = frames
         for frame in frames:
+            if self.parent_editor and 0 <= frame < len(self.parent_editor.mask_frames):
+                frame_mask = self.parent_editor.mask_frames[frame]
+                state['mask_frames'][frame] = frame_mask.copy() if frame_mask is not None else None
+            else:
+                state['mask_frames'][frame] = None
             if frame in self.shape_keyframes:
                 state['shape_keyframes'][frame] = [self._clone_shape(shape) for shape in self.shape_keyframes[frame]]
             else:
@@ -8034,10 +8234,22 @@ class MaskDrawingWidget(QWidget):
     
     def restore_state(self, state):
         """Restore a saved state"""
-        # Restore mask
-        if state['mask'] is not None:
-            self.mask = state['mask'].copy()
-        
+        parent_editor = self.parent_editor
+
+        if parent_editor and state.get('mask_frames'):
+            if state.get('full_snapshot', True):
+                for frame, frame_mask in state['mask_frames'].items():
+                    if 0 <= frame < len(parent_editor.mask_frames):
+                        parent_editor.mask_frames[frame] = frame_mask.copy() if frame_mask is not None else np.zeros_like(parent_editor.mask_frames[frame])
+            else:
+                for frame in state.get('affected_frames') or []:
+                    if 0 <= frame < len(parent_editor.mask_frames):
+                        frame_mask = state['mask_frames'].get(frame)
+                        if frame_mask is not None:
+                            parent_editor.mask_frames[frame] = frame_mask.copy()
+                        else:
+                            parent_editor.mask_frames[frame] = np.zeros_like(parent_editor.mask_frames[frame])
+
         if state.get('full_snapshot', True):
             # Restore complete shape keyframe state.
             self.shape_keyframes.clear()
@@ -8053,6 +8265,16 @@ class MaskDrawingWidget(QWidget):
         
         # Clear interpolation cache
         self.invalidate_shape_cache()
+
+        # Restore the current visible mask from the parent frame buffer when possible.
+        if parent_editor:
+            current_frame = int(parent_editor.current_frame_index)
+            if 0 <= current_frame < len(parent_editor.mask_frames):
+                self.mask = parent_editor.mask_frames[current_frame].copy()
+            elif state['mask'] is not None:
+                self.mask = state['mask'].copy()
+        elif state['mask'] is not None:
+            self.mask = state['mask'].copy()
         
         # Update display
         if self.drawing_mode == "shape":
@@ -8061,8 +8283,9 @@ class MaskDrawingWidget(QWidget):
             self.update()
         
         # Update timeline
-        if self.parent_editor:
-            self.parent_editor.update_mask_frame_tracking()
+        if parent_editor:
+            parent_editor.update_mask_frame_tracking()
+            parent_editor.update_display()
     
     def setup_liquify_for_current_frame(self):
         """Set up liquify for the current frame - called on first mouse move"""
