@@ -647,7 +647,7 @@ class InpaintingMaskEditor(QDialog):
 
         # Create tool button style (dark theme)
         tool_button_style = f"""
-            QPushButton {
+            QPushButton {{
                 border: 1px solid #555;
                 border-radius: 4px;
                 padding: 4px;
@@ -656,30 +656,30 @@ class InpaintingMaskEditor(QDialog):
                 max-width: {tool_button_px}px;
                 max-height: {tool_button_px}px;
                 background-color: #3a3a3a;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #4a4a4a;
                 border-color: #666;
-            }
-            QPushButton:checked {
+            }}
+            QPushButton:checked {{
                 background-color: #4a90e2;
                 border: 2px solid #2e6cb8;
-            }
-            QPushButton:checked:hover {
+            }}
+            QPushButton:checked:hover {{
                 background-color: #5ba0f2;
-            }
+            }}
         """
 
         # Add a label to show current brush mode
         mode_label_style = f"""
-            QLabel {
+            QLabel {{
                 background-color: #333;
                 color: white;
                 padding: 2px 6px;
                 border-radius: 3px;
                 font-size: {mode_font_px}px;
                 font-weight: bold;
-            }
+            }}
         """
 
         # Left side tool panel
@@ -960,7 +960,7 @@ class InpaintingMaskEditor(QDialog):
         sep2.setVisible(False)
         
         clear_button_style = f"""
-            QPushButton {
+            QPushButton {{
                 background-color: #595959;
                 color: #ffffff;
                 font-weight: 600;
@@ -968,13 +968,13 @@ class InpaintingMaskEditor(QDialog):
                 border: 1px solid #777;
                 border-radius: 4px;
                 padding: {button_padding_v}px {button_padding_h}px;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #6b6b6b;
-            }
+            }}
         """
         connect_button_style = f"""
-            QPushButton {
+            QPushButton {{
                 background-color: #4f6478;
                 color: #ffffff;
                 font-weight: 600;
@@ -982,13 +982,13 @@ class InpaintingMaskEditor(QDialog):
                 border: 1px solid #6f859a;
                 border-radius: 4px;
                 padding: {button_padding_v}px {button_padding_h}px;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #5d7690;
-            }
+            }}
         """
         cleanup_button_style = f"""
-            QPushButton {
+            QPushButton {{
                 background-color: #6a4f4f;
                 color: #ffffff;
                 font-weight: 600;
@@ -996,13 +996,13 @@ class InpaintingMaskEditor(QDialog):
                 border: 1px solid #8c6666;
                 border-radius: 4px;
                 padding: {button_padding_v}px {button_padding_h}px;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #7a5d5d;
-            }
+            }}
         """
         buffer_button_style = f"""
-            QPushButton {
+            QPushButton {{
                 background-color: #6d6948;
                 color: #ffffff;
                 font-weight: 600;
@@ -1010,13 +1010,13 @@ class InpaintingMaskEditor(QDialog):
                 border: 1px solid #91895e;
                 border-radius: 4px;
                 padding: {button_padding_v}px {button_padding_h}px;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #817b55;
-            }
+            }}
         """
         edge_button_style = f"""
-            QPushButton {
+            QPushButton {{
                 background-color: #4c6654;
                 color: #ffffff;
                 font-weight: 600;
@@ -1024,18 +1024,18 @@ class InpaintingMaskEditor(QDialog):
                 border: 1px solid #6f8b77;
                 border-radius: 4px;
                 padding: {button_padding_v}px {button_padding_h}px;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #597861;
-            }
+            }}
         """
         section_label_style = f"""
-            QLabel {
+            QLabel {{
                 color: #cfcfcf;
                 font-size: {compact_font_px}px;
                 font-weight: 600;
                 padding: 0 2px;
-            }
+            }}
         """
         
         self.clear_section_label = QLabel("Clear")
