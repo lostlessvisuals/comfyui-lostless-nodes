@@ -67,6 +67,8 @@ from PyQt5.QtWidgets import QMenuBar, QMenu, QAction, QFileDialog, QMessageBox, 
 from PyQt5.QtCore import Qt, QTimer
 from pathlib import Path
 
+CANCEL_EXIT_CODE = 2
+
 def load_single_image_mask_editor(img_path):
     """Load a single image file - for parallel processing in mask editor"""
     try:
@@ -2564,10 +2566,18 @@ def main():
         # User cancelled - clean up any auto-saved session data
         if hasattr(editor, 'clean_up_enhanced_session_data'):
             editor.clean_up_enhanced_session_data()
-        return 1
+        return CANCEL_EXIT_CODE
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        sys.stderr.flush()
+        sys.stdout.flush()
+        sys.exit(1)
 
 
 

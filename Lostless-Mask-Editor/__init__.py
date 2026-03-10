@@ -39,6 +39,7 @@ import sys
 _CACHE_ATTR_NAME = "mask_editor_global_cache"
 _MASK_EDITOR_MEMORY_KEY = "mask_editor_reuse_last_edit"
 _MASK_EDITOR_MEMORY_ROUTES_KEY = "mask_editor_reuse_last_edit_routes"
+_MASK_EDITOR_CANCEL_EXIT_CODE = 2
 
 def get_persistent_cache():
     """Get cache that persists across ComfyUI module reloads"""
@@ -397,10 +398,12 @@ class MaskEditor:
         )
 
         if proc.returncode != 0:
+            stdout_tail = (proc.stdout or "").strip()[-1000:]
             stderr_tail = (proc.stderr or "").strip()[-1000:]
-            if proc.returncode == 1:
+            if proc.returncode == _MASK_EDITOR_CANCEL_EXIT_CODE:
                 raise RuntimeError("Mask editor was cancelled before accepting changes.")
-            raise RuntimeError(f"Mask editor failed (exit {proc.returncode}): {stderr_tail}")
+            detail = stderr_tail or stdout_tail or "no launcher output captured"
+            raise RuntimeError(f"Mask editor failed (exit {proc.returncode}): {detail}")
 
         edited_masks_path = os.path.join(output_dir, "edited_masks.npy")
         if not os.path.exists(edited_masks_path):

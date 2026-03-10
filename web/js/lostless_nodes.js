@@ -17,7 +17,8 @@ function markNodeDirty(node) {
 }
 
 function isLegacyProjectDataName(name) {
-  return String(name || "").toLowerCase().replace(/[\s_-]+/g, "") === "projectdata";
+  const normalized = String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return normalized === "projectdata" || normalized.startsWith("projectdata");
 }
 
 function removeLegacyProjectDataSlots(node) {
