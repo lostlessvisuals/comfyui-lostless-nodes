@@ -41,6 +41,19 @@ _MASK_EDITOR_MEMORY_KEY = "mask_editor_reuse_last_edit"
 _MASK_EDITOR_MEMORY_ROUTES_KEY = "mask_editor_reuse_last_edit_routes"
 _MASK_EDITOR_CANCEL_EXIT_CODE = 2
 
+def _normalize_memory_key(unique_id):
+    if unique_id is None:
+        return None
+    if isinstance(unique_id, (list, tuple)) and len(unique_id) == 1:
+        unique_id = unique_id[0]
+    if isinstance(unique_id, dict):
+        for candidate in ("unique_id", "node_id", "id"):
+            if candidate in unique_id:
+                unique_id = unique_id[candidate]
+                break
+    key = str(unique_id).strip()
+    return key or None
+
 def get_persistent_cache():
     """Get cache that persists across ComfyUI module reloads"""
     if not hasattr(sys.modules[__name__], _CACHE_ATTR_NAME):
@@ -55,17 +68,21 @@ def get_mask_editor_memory_cache():
 
 def clear_mask_editor_memory(unique_id=None):
     cache = get_mask_editor_memory_cache()
+    key = _normalize_memory_key(unique_id)
     if unique_id is None:
         cleared = bool(cache)
         cache.clear()
         return cleared
-    return cache.pop(str(unique_id), None) is not None
+    if key is None:
+        return False
+    return cache.pop(key, None) is not None
 
 def get_mask_editor_memory_status(unique_id=None):
     cache = get_mask_editor_memory_cache()
-    if unique_id is None:
+    key = _normalize_memory_key(unique_id)
+    if key is None:
         return {"has_memory": False, "memory_status": "Memory: unavailable"}
-    entry = cache.get(str(unique_id))
+    entry = cache.get(key)
     if not entry:
         return {"has_memory": False, "memory_status": "Memory: empty"}
     shape = entry.get("shape")
@@ -150,10 +167,11 @@ class MaskEditor:
         return None
 
     def _get_cached_masks(self, unique_id, expected_shape):
-        if unique_id is None:
+        key = _normalize_memory_key(unique_id)
+        if key is None:
             return None, "Memory: unavailable"
 
-        entry = get_mask_editor_memory_cache().get(str(unique_id))
+        entry = get_mask_editor_memory_cache().get(key)
         if not entry:
             return None, "Memory: empty"
 
@@ -171,13 +189,14 @@ class MaskEditor:
         return tensor, "Memory: reused last edit"
 
     def _store_cached_masks(self, unique_id, masks):
-        if unique_id is None:
+        key = _normalize_memory_key(unique_id)
+        if key is None:
             return
         import numpy as np
 
         masks_cpu = masks.detach().cpu().numpy().astype(np.float32)
         masks_u8 = np.clip(masks_cpu * 255.0, 0, 255).astype(np.uint8)
-        get_mask_editor_memory_cache()[str(unique_id)] = {
+        get_mask_editor_memory_cache()[key] = {
             "masks": masks_u8,
             "shape": tuple(int(v) for v in masks_u8.shape),
             "updated_at": time.time(),
@@ -422,8 +441,8 @@ class MaskEditor:
             )
 
         edited_masks_tensor = torch.from_numpy(edited_masks.astype(np.float32) / 255.0)
+        self._store_cached_masks(unique_id, edited_masks_tensor)
         if reuse_last_edit:
-            self._store_cached_masks(unique_id, edited_masks_tensor)
             memory_status = "Memory: saved last edit"
         elif cached_masks is not None:
             memory_status = "Memory: used cache once"

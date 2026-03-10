@@ -2068,7 +2068,12 @@ class InpaintingMaskEditor(QDialog):
         current_mask = self.mask_widget.mask.copy()
         self.mask_frames[current_frame] = current_mask.copy()
         for frame_i in valid_frames:
-            self.mask_frames[frame_i] = current_mask.copy()
+            existing_mask = self.mask_frames[frame_i]
+            if existing_mask is None:
+                merged_mask = current_mask.copy()
+            else:
+                merged_mask = np.maximum(existing_mask, current_mask)
+            self.mask_frames[frame_i] = merged_mask
 
         self.update_mask_frame_tracking()
         return True
@@ -7650,6 +7655,10 @@ class MaskDrawingWidget(QWidget):
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts for tools"""
         try:
+            if event.key() in (Qt.Key_Left, Qt.Key_Right) and self.parent_editor:
+                self.parent_editor.keyPressEvent(event)
+                event.accept()
+                return
             if event.key() == Qt.Key_B:
                 if event.modifiers() & Qt.ShiftModifier:
                     # Shift+B - Toggle between brush modes (pixel <-> shape)
