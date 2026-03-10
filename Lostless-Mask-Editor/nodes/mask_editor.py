@@ -592,6 +592,10 @@ class InpaintingMaskEditor(QDialog):
         wide_button_min_width = max(56, int(round(58 * self._ui_scale)))
         compact_button_min_width = max(48, int(round(50 * self._ui_scale)))
         compact_spin_width = max(56, int(round(66 * self._ui_scale)))
+        action_button_height = max(28, int(round(30 * self._ui_scale)))
+        action_card_min_width = max(184, int(round(212 * self._ui_scale)))
+        action_card_spacing = max(6, int(round(8 * self._ui_scale)))
+        value_chip_min_width = max(32, int(round(36 * self._ui_scale)))
 
         # Enable keyboard shortcuts
         self.setFocusPolicy(Qt.StrongFocus)
@@ -613,24 +617,21 @@ class InpaintingMaskEditor(QDialog):
 
         toolbar_primary_row = QHBoxLayout()
         toolbar_primary_row.setContentsMargins(0, 0, 0, 0)
-        toolbar_primary_row.setSpacing(4)
+        toolbar_primary_row.setSpacing(action_card_spacing)
         toolbar_controls_layout.addLayout(toolbar_primary_row)
         toolbar_controls_layout.addStretch()
 
         toolbar_actions_panel = QWidget()
         toolbar_actions_layout = QVBoxLayout(toolbar_actions_panel)
         toolbar_actions_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_actions_layout.setSpacing(4)
+        toolbar_actions_layout.setSpacing(action_card_spacing)
 
-        toolbar_secondary_row = QHBoxLayout()
-        toolbar_secondary_row.setContentsMargins(0, 0, 0, 0)
-        toolbar_secondary_row.setSpacing(4)
-        toolbar_actions_layout.addLayout(toolbar_secondary_row)
-
-        toolbar_tertiary_row = QHBoxLayout()
-        toolbar_tertiary_row.setContentsMargins(0, 0, 0, 0)
-        toolbar_tertiary_row.setSpacing(4)
-        toolbar_actions_layout.addLayout(toolbar_tertiary_row)
+        toolbar_actions_grid_host = QWidget()
+        toolbar_actions_grid = QGridLayout(toolbar_actions_grid_host)
+        toolbar_actions_grid.setContentsMargins(0, 0, 0, 0)
+        toolbar_actions_grid.setHorizontalSpacing(action_card_spacing)
+        toolbar_actions_grid.setVerticalSpacing(action_card_spacing)
+        toolbar_actions_layout.addWidget(toolbar_actions_grid)
 
         toolbar_controls_panel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         toolbar_actions_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -642,6 +643,8 @@ class InpaintingMaskEditor(QDialog):
         self.toolbar_shell_layout = toolbar_shell_layout
         self.toolbar_controls_panel = toolbar_controls_panel
         self.toolbar_actions_panel = toolbar_actions_panel
+        self.toolbar_actions_grid = toolbar_actions_grid
+        self.toolbar_actions_grid_host = toolbar_actions_grid_host
 
         toolbar_layout = toolbar_primary_row
 
@@ -675,10 +678,32 @@ class InpaintingMaskEditor(QDialog):
             QLabel {{
                 background-color: #333;
                 color: white;
-                padding: 2px 6px;
-                border-radius: 3px;
+                padding: 3px 10px;
+                border-radius: 999px;
+                min-width: {max(68, int(round(78 * self._ui_scale)))}px;
                 font-size: {mode_font_px}px;
                 font-weight: bold;
+                letter-spacing: 0.4px;
+            }}
+        """
+        control_label_style = f"""
+            QLabel {{
+                color: #c9d1d9;
+                font-size: {compact_font_px}px;
+                font-weight: 600;
+                padding: 0 1px;
+            }}
+        """
+        value_chip_style = f"""
+            QLabel {{
+                background-color: #30363d;
+                color: #f0f3f6;
+                border: 1px solid #4b5560;
+                border-radius: 999px;
+                padding: 2px 8px;
+                min-width: {value_chip_min_width}px;
+                font-size: {compact_font_px}px;
+                font-weight: 600;
             }}
         """
 
@@ -852,7 +877,9 @@ class InpaintingMaskEditor(QDialog):
         tools_layout.addStretch()
         
         # Compact top toolbar items
-        toolbar_layout.addWidget(QLabel("Size:"))
+        brush_size_caption = QLabel("Size")
+        brush_size_caption.setStyleSheet(control_label_style)
+        toolbar_layout.addWidget(brush_size_caption)
         self.brush_size_slider = QSlider(Qt.Horizontal)
         self.brush_size_slider.setRange(1, 500)
         # Load saved brush sizes for each tool or use defaults
@@ -874,7 +901,9 @@ class InpaintingMaskEditor(QDialog):
         toolbar_layout.addWidget(self.brush_size_slider)
         
         self.brush_size_label = QLabel(str(saved_brush_size))
-        self.brush_size_label.setMinimumWidth(25)
+        self.brush_size_label.setMinimumWidth(value_chip_min_width)
+        self.brush_size_label.setAlignment(Qt.AlignCenter)
+        self.brush_size_label.setStyleSheet(value_chip_style)
         toolbar_layout.addWidget(self.brush_size_label)
         
         # Separator
@@ -883,6 +912,7 @@ class InpaintingMaskEditor(QDialog):
         
         # Vertex count controls for shape mode
         self.vertex_count_label_text = QLabel("Vertices:")
+        self.vertex_count_label_text.setStyleSheet(control_label_style)
         self.vertex_count_label_text.setVisible(False)  # Hidden by default
         toolbar_layout.addWidget(self.vertex_count_label_text)
         
@@ -901,7 +931,9 @@ class InpaintingMaskEditor(QDialog):
         toolbar_layout.addWidget(self.vertex_count_slider)
         
         self.vertex_count_label = QLabel(str(initial_vertex_count))
-        self.vertex_count_label.setMinimumWidth(30)
+        self.vertex_count_label.setMinimumWidth(value_chip_min_width)
+        self.vertex_count_label.setAlignment(Qt.AlignCenter)
+        self.vertex_count_label.setStyleSheet(value_chip_style)
         self.vertex_count_label.setVisible(False)  # Hidden by default
         toolbar_layout.addWidget(self.vertex_count_label)
         
@@ -933,6 +965,7 @@ class InpaintingMaskEditor(QDialog):
         
         # Lattice resolution controls for liquify mode
         self.lattice_size_label_text = QLabel("Grid size:")
+        self.lattice_size_label_text.setStyleSheet(control_label_style)
         self.lattice_size_label_text.setVisible(False)  # Hidden by default
         toolbar_layout.addWidget(self.lattice_size_label_text)
         
@@ -948,17 +981,41 @@ class InpaintingMaskEditor(QDialog):
         toolbar_layout.addWidget(self.lattice_size_slider)
         
         self.lattice_size_label = QLabel(str(saved_lattice_size))
-        self.lattice_size_label.setMinimumWidth(25)
+        self.lattice_size_label.setMinimumWidth(value_chip_min_width)
+        self.lattice_size_label.setAlignment(Qt.AlignCenter)
+        self.lattice_size_label.setStyleSheet(value_chip_style)
         self.lattice_size_label.setVisible(False)  # Hidden by default
         toolbar_layout.addWidget(self.lattice_size_label)
 
         toolbar_primary_row.addStretch()
-        toolbar_layout = toolbar_secondary_row
         
-        # Separator
-        sep2 = QFrame()
-        sep2.setVisible(False)
-        
+        card_title_style = f"""
+            QLabel {{
+                color: #f1f4f7;
+                font-size: {compact_font_px}px;
+                font-weight: 700;
+                padding: 0;
+            }}
+        """
+        card_meta_label_style = f"""
+            QLabel {{
+                color: #b8c0c7;
+                font-size: {max(10, compact_font_px - 1)}px;
+                font-weight: 600;
+                padding: 0;
+            }}
+        """
+        action_card_style = f"""
+            QFrame#MaskActionCard {{
+                background-color: #20252b;
+                border: 1px solid #3a424b;
+                border-radius: 10px;
+            }}
+            QFrame#MaskActionCard[active="true"] {{
+                border-color: #4c5967;
+            }}
+        """
+
         clear_button_style = f"""
             QPushButton {{
                 background-color: #595959;
@@ -966,8 +1023,9 @@ class InpaintingMaskEditor(QDialog):
                 font-weight: 600;
                 font-size: {compact_font_px}px;
                 border: 1px solid #777;
-                border-radius: 4px;
+                border-radius: 7px;
                 padding: {button_padding_v}px {button_padding_h}px;
+                min-height: {action_button_height}px;
             }}
             QPushButton:hover {{
                 background-color: #6b6b6b;
@@ -980,8 +1038,9 @@ class InpaintingMaskEditor(QDialog):
                 font-weight: 600;
                 font-size: {compact_font_px}px;
                 border: 1px solid #6f859a;
-                border-radius: 4px;
+                border-radius: 7px;
                 padding: {button_padding_v}px {button_padding_h}px;
+                min-height: {action_button_height}px;
             }}
             QPushButton:hover {{
                 background-color: #5d7690;
@@ -994,8 +1053,9 @@ class InpaintingMaskEditor(QDialog):
                 font-weight: 600;
                 font-size: {compact_font_px}px;
                 border: 1px solid #8c6666;
-                border-radius: 4px;
+                border-radius: 7px;
                 padding: {button_padding_v}px {button_padding_h}px;
+                min-height: {action_button_height}px;
             }}
             QPushButton:hover {{
                 background-color: #7a5d5d;
@@ -1008,8 +1068,9 @@ class InpaintingMaskEditor(QDialog):
                 font-weight: 600;
                 font-size: {compact_font_px}px;
                 border: 1px solid #91895e;
-                border-radius: 4px;
+                border-radius: 7px;
                 padding: {button_padding_v}px {button_padding_h}px;
+                min-height: {action_button_height}px;
             }}
             QPushButton:hover {{
                 background-color: #817b55;
@@ -1022,67 +1083,83 @@ class InpaintingMaskEditor(QDialog):
                 font-weight: 600;
                 font-size: {compact_font_px}px;
                 border: 1px solid #6f8b77;
-                border-radius: 4px;
+                border-radius: 7px;
                 padding: {button_padding_v}px {button_padding_h}px;
+                min-height: {action_button_height}px;
             }}
             QPushButton:hover {{
                 background-color: #597861;
             }}
         """
-        section_label_style = f"""
-            QLabel {{
-                color: #cfcfcf;
-                font-size: {compact_font_px}px;
-                font-weight: 600;
-                padding: 0 2px;
-            }}
-        """
-        
-        self.clear_section_label = QLabel("Clear")
-        self.clear_section_label.setStyleSheet(section_label_style)
-        toolbar_layout.addWidget(self.clear_section_label)
+        def create_action_card(title, object_name):
+            card = QFrame()
+            card.setObjectName("MaskActionCard")
+            card.setProperty("active", "true")
+            card.setStyleSheet(action_card_style)
+            card.setMinimumWidth(action_card_min_width)
+            card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        # Clear current frame button
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(10, 9, 10, 9)
+            card_layout.setSpacing(max(5, int(round(6 * self._ui_scale))))
+
+            title_label = QLabel(title)
+            title_label.setObjectName(f"{object_name}_title")
+            title_label.setStyleSheet(card_title_style)
+            card_layout.addWidget(title_label)
+
+            action_row = QHBoxLayout()
+            action_row.setContentsMargins(0, 0, 0, 0)
+            action_row.setSpacing(max(5, int(round(6 * self._ui_scale))))
+            card_layout.addLayout(action_row)
+
+            meta_row = QHBoxLayout()
+            meta_row.setContentsMargins(0, 0, 0, 0)
+            meta_row.setSpacing(max(5, int(round(6 * self._ui_scale))))
+            card_layout.addLayout(meta_row)
+
+            return card, card_layout, title_label, action_row, meta_row
+
+        def style_action_button(button, style_sheet):
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            button.setMinimumWidth(max(wide_button_min_width, action_button_height * 2))
+            button.setMinimumHeight(action_button_height)
+            button.setStyleSheet(style_sheet)
+
+        def style_meta_label(label):
+            label.setStyleSheet(card_meta_label_style)
+
+        self.clear_card, _, self.clear_section_label, clear_actions_row, clear_meta_row = create_action_card("Clear", "clear")
         self.clear_btn = QPushButton("Frame")
-        self.clear_btn.setMinimumWidth(wide_button_min_width)
         self.clear_btn.clicked.connect(self.clear_current_frame)
         self.clear_btn.setToolTip("Clear: current frame mask only")
-        self.clear_btn.setStyleSheet(clear_button_style)
-        toolbar_layout.addWidget(self.clear_btn)
-        
-        # Clear all frames button
+        style_action_button(self.clear_btn, clear_button_style)
+        clear_actions_row.addWidget(self.clear_btn)
+
         self.clear_all_btn = QPushButton("All")
-        self.clear_all_btn.setMinimumWidth(compact_button_min_width)
         self.clear_all_btn.clicked.connect(self.clear_all_frames)
         self.clear_all_btn.setToolTip("Clear: all frame masks (confirmation required)")
-        self.clear_all_btn.setStyleSheet(clear_button_style)
-        toolbar_layout.addWidget(self.clear_all_btn)
+        style_action_button(self.clear_all_btn, clear_button_style)
+        clear_actions_row.addWidget(self.clear_all_btn)
+        clear_meta_row.addStretch()
 
-        # Visual separation between clear and connect groups
-        sep_connect_group = QFrame()
-        sep_connect_group.setVisible(False)
-        self.connect_section_label = QLabel("Connect")
-        self.connect_section_label.setStyleSheet(section_label_style)
-        toolbar_layout.addWidget(self.connect_section_label)
-        
-        # Connect floating masks button (shape/liquify modes)
+        self.connect_card, _, self.connect_section_label, connect_actions_row, connect_meta_row = create_action_card("Connect", "connect")
         self.connect_masks_btn = QPushButton("Frame")
-        self.connect_masks_btn.setMinimumWidth(wide_button_min_width)
         self.connect_masks_btn.setToolTip("Connect: floating masks on current frame")
         self.connect_masks_btn.clicked.connect(self.connect_floating_masks_current_frame)
-        self.connect_masks_btn.setStyleSheet(connect_button_style)
-        toolbar_layout.addWidget(self.connect_masks_btn)
+        style_action_button(self.connect_masks_btn, connect_button_style)
+        connect_actions_row.addWidget(self.connect_masks_btn)
 
         self.connect_masks_all_btn = QPushButton("All")
-        self.connect_masks_all_btn.setMinimumWidth(compact_button_min_width)
         self.connect_masks_all_btn.setToolTip("Connect: floating masks on all keyframes")
         self.connect_masks_all_btn.clicked.connect(self.connect_floating_masks_all_frames)
-        self.connect_masks_all_btn.setStyleSheet(connect_button_style)
-        toolbar_layout.addWidget(self.connect_masks_all_btn)
+        style_action_button(self.connect_masks_all_btn, connect_button_style)
+        connect_actions_row.addWidget(self.connect_masks_all_btn)
 
         self.connect_distance_label = QLabel("Gap %")
         self.connect_distance_label.setToolTip("Maximum distance threshold for connecting floating masks (percent of frame diagonal)")
-        toolbar_layout.addWidget(self.connect_distance_label)
+        style_meta_label(self.connect_distance_label)
+        connect_meta_row.addWidget(self.connect_distance_label)
         
         self.connect_distance_spinner = QSpinBox()
         self.connect_distance_spinner.setRange(1, 100)
@@ -1093,51 +1170,40 @@ class InpaintingMaskEditor(QDialog):
         self.connect_distance_spinner.valueChanged.connect(
             lambda value: self.settings.setValue('connect_mask_distance_percent', int(value))
         )
-        toolbar_layout.addWidget(self.connect_distance_spinner)
+        connect_meta_row.addWidget(self.connect_distance_spinner)
+        connect_meta_row.addStretch()
 
-        toolbar_layout = toolbar_tertiary_row
-
-        sep_cleanup_group = QFrame()
-        sep_cleanup_group.setVisible(False)
-        self.cleanup_section_label = QLabel("Largest")
-        self.cleanup_section_label.setStyleSheet(section_label_style)
-        toolbar_layout.addWidget(self.cleanup_section_label)
-
+        self.cleanup_card, _, self.cleanup_section_label, cleanup_actions_row, cleanup_meta_row = create_action_card("Keep Largest", "cleanup")
         self.keep_largest_mask_frame_btn = QPushButton("Frame")
-        self.keep_largest_mask_frame_btn.setMinimumWidth(wide_button_min_width)
         self.keep_largest_mask_frame_btn.setToolTip("Cleanup: keep only largest mask on current frame")
         self.keep_largest_mask_frame_btn.clicked.connect(self.keep_largest_mask_current_frame)
-        self.keep_largest_mask_frame_btn.setStyleSheet(cleanup_button_style)
-        toolbar_layout.addWidget(self.keep_largest_mask_frame_btn)
+        style_action_button(self.keep_largest_mask_frame_btn, cleanup_button_style)
+        cleanup_actions_row.addWidget(self.keep_largest_mask_frame_btn)
 
         self.keep_largest_masks_btn = QPushButton("All")
-        self.keep_largest_masks_btn.setMinimumWidth(compact_button_min_width)
         self.keep_largest_masks_btn.setToolTip("Cleanup: keep only largest mask on all keyframes")
         self.keep_largest_masks_btn.clicked.connect(self.keep_largest_mask_all_keyframes)
-        self.keep_largest_masks_btn.setStyleSheet(cleanup_button_style)
-        toolbar_layout.addWidget(self.keep_largest_masks_btn)
+        style_action_button(self.keep_largest_masks_btn, cleanup_button_style)
+        cleanup_actions_row.addWidget(self.keep_largest_masks_btn)
+        cleanup_meta_row.addStretch()
 
-        self.edge_section_label = QLabel("Edge")
-        self.edge_section_label.setStyleSheet(section_label_style)
-        toolbar_layout.addWidget(self.edge_section_label)
-
+        self.edge_card, _, self.edge_section_label, edge_actions_row, edge_meta_row = create_action_card("Snap To Edge", "edge")
         self.expand_edge_btn = QPushButton("Frame")
-        self.expand_edge_btn.setMinimumWidth(wide_button_min_width)
         self.expand_edge_btn.setToolTip("Expand the current mask to any viewer edge that is already within the threshold")
         self.expand_edge_btn.clicked.connect(self.expand_mask_to_edges_current_frame)
-        self.expand_edge_btn.setStyleSheet(edge_button_style)
-        toolbar_layout.addWidget(self.expand_edge_btn)
+        style_action_button(self.expand_edge_btn, edge_button_style)
+        edge_actions_row.addWidget(self.expand_edge_btn)
 
         self.expand_edge_all_btn = QPushButton("All")
-        self.expand_edge_all_btn.setMinimumWidth(compact_button_min_width)
         self.expand_edge_all_btn.setToolTip("Expand every mask in the sequence to any edge that is already within the threshold")
         self.expand_edge_all_btn.clicked.connect(self.expand_mask_to_edges_all_frames)
-        self.expand_edge_all_btn.setStyleSheet(edge_button_style)
-        toolbar_layout.addWidget(self.expand_edge_all_btn)
+        style_action_button(self.expand_edge_all_btn, edge_button_style)
+        edge_actions_row.addWidget(self.expand_edge_all_btn)
 
         self.edge_snap_label = QLabel("Edge %")
         self.edge_snap_label.setToolTip("If mask pixels are within this percent of an edge, extend them to that edge")
-        toolbar_layout.addWidget(self.edge_snap_label)
+        style_meta_label(self.edge_snap_label)
+        edge_meta_row.addWidget(self.edge_snap_label)
 
         self.edge_snap_spinner = QSpinBox()
         self.edge_snap_spinner.setRange(0, 50)
@@ -1149,29 +1215,26 @@ class InpaintingMaskEditor(QDialog):
         self.edge_snap_spinner.valueChanged.connect(
             lambda value: self.settings.setValue('mask_editor_edge_snap_percent', int(value))
         )
-        toolbar_layout.addWidget(self.edge_snap_spinner)
+        edge_meta_row.addWidget(self.edge_snap_spinner)
+        edge_meta_row.addStretch()
 
-        self.buffer_section_label = QLabel("Buffer")
-        self.buffer_section_label.setStyleSheet(section_label_style)
-        toolbar_layout.addWidget(self.buffer_section_label)
-
+        self.buffer_card, _, self.buffer_section_label, buffer_actions_row, buffer_meta_row = create_action_card("Buffer", "buffer")
         self.buffer_mask_btn = QPushButton("Frame")
-        self.buffer_mask_btn.setMinimumWidth(wide_button_min_width)
         self.buffer_mask_btn.setToolTip("Grow the current mask by the buffer percentage without crossing the frame edge")
         self.buffer_mask_btn.clicked.connect(self.buffer_mask_current_frame)
-        self.buffer_mask_btn.setStyleSheet(buffer_button_style)
-        toolbar_layout.addWidget(self.buffer_mask_btn)
+        style_action_button(self.buffer_mask_btn, buffer_button_style)
+        buffer_actions_row.addWidget(self.buffer_mask_btn)
 
         self.buffer_masks_all_btn = QPushButton("All")
-        self.buffer_masks_all_btn.setMinimumWidth(compact_button_min_width)
         self.buffer_masks_all_btn.setToolTip("Grow every mask in the sequence by the buffer percentage without crossing the frame edge")
         self.buffer_masks_all_btn.clicked.connect(self.buffer_mask_all_frames)
-        self.buffer_masks_all_btn.setStyleSheet(buffer_button_style)
-        toolbar_layout.addWidget(self.buffer_masks_all_btn)
+        style_action_button(self.buffer_masks_all_btn, buffer_button_style)
+        buffer_actions_row.addWidget(self.buffer_masks_all_btn)
 
         self.buffer_percent_label = QLabel("Buffer %")
         self.buffer_percent_label.setToolTip("Grow the mask by this percent of the shorter frame dimension")
-        toolbar_layout.addWidget(self.buffer_percent_label)
+        style_meta_label(self.buffer_percent_label)
+        buffer_meta_row.addWidget(self.buffer_percent_label)
 
         self.buffer_percent_spinner = QSpinBox()
         self.buffer_percent_spinner.setRange(0, 25)
@@ -1183,15 +1246,36 @@ class InpaintingMaskEditor(QDialog):
         self.buffer_percent_spinner.valueChanged.connect(
             lambda value: self.settings.setValue('mask_editor_buffer_percent', int(value))
         )
-        toolbar_layout.addWidget(self.buffer_percent_spinner)
+        buffer_meta_row.addWidget(self.buffer_percent_spinner)
+        buffer_meta_row.addStretch()
         
-        # Bake liquify button (only visible in liquify mode)
+        self.bake_card, _, self.bake_section_label, bake_actions_row, bake_meta_row = create_action_card("Liquify", "bake")
         self.bake_liquify_btn = QPushButton("Bake Liquify")
-        self.bake_liquify_btn.setMaximumWidth(max(100, int(round(120 * self._ui_scale))))
         self.bake_liquify_btn.clicked.connect(self.bake_liquify)
         self.bake_liquify_btn.setToolTip("Apply liquify deformation permanently and reset the lattice")
-        self.bake_liquify_btn.setVisible(False)  # Hidden by default
-        toolbar_layout.addWidget(self.bake_liquify_btn)
+        style_action_button(self.bake_liquify_btn, edge_button_style)
+        bake_actions_row.addWidget(self.bake_liquify_btn)
+        bake_meta_hint = QLabel("Commit the current deformation")
+        bake_meta_hint.setStyleSheet(card_meta_label_style)
+        bake_meta_row.addWidget(bake_meta_hint)
+        bake_meta_row.addStretch()
+        self.bake_card.setVisible(False)
+
+        self.action_cards = [
+            self.clear_card,
+            self.connect_card,
+            self.cleanup_card,
+            self.edge_card,
+            self.buffer_card,
+            self.bake_card,
+        ]
+        self._action_card_columns = None
+        self._action_card_layout_signature = None
+        self.connect_card.setVisible(False)
+        self.cleanup_card.setVisible(False)
+        self.bake_card.setVisible(False)
+        for card in self.action_cards:
+            self.toolbar_actions_grid.addWidget(card)
 
         main_layout.addWidget(top_toolbar)
         
@@ -1542,14 +1626,10 @@ class InpaintingMaskEditor(QDialog):
         self.vertex_count_slider.setVisible(mode == "shape")  # Only for shape mode
         self.vertex_count_label.setVisible(mode == "shape")  # Only for shape mode
         self.vertex_sep.setVisible(mode == "shape")  # Only for shape mode
-        self.connect_section_label.setVisible(is_shape_mode)
-        self.connect_masks_btn.setVisible(is_shape_mode)
-        self.connect_masks_all_btn.setVisible(is_shape_mode)
-        self.cleanup_section_label.setVisible(is_shape_mode)
-        self.keep_largest_mask_frame_btn.setVisible(is_shape_mode)
-        self.keep_largest_masks_btn.setVisible(is_shape_mode)
-        self.connect_distance_label.setVisible(is_shape_mode)
-        self.connect_distance_spinner.setVisible(is_shape_mode)
+        self.connect_card.setVisible(is_shape_mode)
+        self.cleanup_card.setVisible(is_shape_mode)
+        self.bake_card.setVisible(mode == "liquify")
+        self._apply_responsive_chrome()
         
         # Reset warp mode when switching modes
         if mode != "shape":
@@ -2427,46 +2507,54 @@ class InpaintingMaskEditor(QDialog):
         
         # Save undo state before clearing
         self.mask_widget.save_undo_state("Clear all frames", full_snapshot=True)
-        
-        # Clear any active liquify deformation first
-        if self.drawing_mode == "liquify":
-            # Reset liquify state
-            if hasattr(self.mask_widget, 'liquify_deformation_field'):
-                self.mask_widget.liquify_deformation_field = None
-            if hasattr(self.mask_widget, 'liquify_original_shapes'):
-                self.mask_widget.liquify_original_shapes = None
-            if hasattr(self.mask_widget, '_temp_deformed_shapes'):
-                self.mask_widget._temp_deformed_shapes = None
+
+        # Clear every raster frame regardless of current mode.
+        for i in range(len(self.mask_frames)):
+            self.mask_frames[i] = np.zeros_like(self.mask_frames[i])
+
+        # Remove all persistent shape/keyframe state.
+        if hasattr(self.mask_widget, 'shape_keyframes'):
+            self.mask_widget.shape_keyframes.clear()
+        if hasattr(self, '_original_shape_keyframes'):
+            del self._original_shape_keyframes
+        if hasattr(self.mask_widget, 'reset_sequence_reference_signature'):
+            self.mask_widget.reset_sequence_reference_signature()
+        if hasattr(self.mask_widget, 'invalidate_shape_cache'):
+            self.mask_widget.invalidate_shape_cache()
+        if hasattr(self.mask_widget, '_shape_cache'):
+            self.mask_widget._shape_cache.clear()
+
+        # Clear every temporary/preview state so no residue survives frame changes.
+        if hasattr(self.mask_widget, '_temp_shapes'):
+            self.mask_widget._temp_shapes = None
+        if hasattr(self.mask_widget, '_temp_interpolated_shapes'):
+            self.mask_widget._temp_interpolated_shapes = {}
+        if hasattr(self.mask_widget, '_temp_deformed_shapes'):
+            self.mask_widget._temp_deformed_shapes = None
+        if hasattr(self.mask_widget, 'temp_shape_mask'):
+            self.mask_widget.temp_shape_mask = None
+        if hasattr(self.mask_widget, 'current_stroke_points'):
+            self.mask_widget.current_stroke_points = []
+        if hasattr(self.mask_widget, 'is_drawing'):
+            self.mask_widget.is_drawing = False
+        if hasattr(self.mask_widget, 'selected_vertex_index'):
+            self.mask_widget.selected_vertex_index = None
+        if hasattr(self.mask_widget, 'selected_shape_index'):
+            self.mask_widget.selected_shape_index = None
+
+        # Clear liquify working state too.
+        if hasattr(self.mask_widget, 'liquify_deformation_field'):
+            self.mask_widget.liquify_deformation_field = None
+        if hasattr(self.mask_widget, 'liquify_original_shapes'):
+            self.mask_widget.liquify_original_shapes = None
+        if hasattr(self.mask_widget, 'is_liquifying'):
             self.mask_widget.is_liquifying = False
-        
-        # Clear shape keyframes regardless of mode (shape/liquify both use shapes)
-        if self.drawing_mode in ["shape", "liquify"]:
-            # In shape/liquify mode, clear all shape keyframes
-            if hasattr(self.mask_widget, 'shape_keyframes'):
-                self.mask_widget.shape_keyframes.clear()
-                # Reset reference signature when clearing all keyframes
-                self.mask_widget.reset_sequence_reference_signature()
-            # Clear shape cache if it exists
-            if hasattr(self.mask_widget, '_shape_cache'):
-                self.mask_widget._shape_cache.clear()
-            # Clear any temporary shapes
-            if hasattr(self.mask_widget, '_temp_shapes'):
-                self.mask_widget._temp_shapes = None
-            if hasattr(self.mask_widget, '_temp_deformed_shapes'):
-                self.mask_widget._temp_deformed_shapes = None
-            # Update mask from shapes for current frame
-            self.mask_widget.update_mask_from_shapes()
-            # Update timeline to remove all keyframe indicators
-            self.update_mask_frame_tracking()
-        else:
-            # In pixel/brush/eraser mode, clear all pixel data
-            for i in range(len(self.mask_frames)):
-                self.mask_frames[i] = np.zeros_like(self.mask_frames[i])
-        
-        # Clear the current mask display
+
+        # Clear the current visible mask immediately.
         if hasattr(self.mask_widget, 'mask') and self.mask_widget.mask is not None:
             self.mask_widget.mask.fill(0)
-        
+
+        self.update_mask_frame_tracking()
         self.update_display()
         # Restore focus to mask widget for keyboard shortcuts
         self.mask_widget.setFocus()
@@ -3356,6 +3444,37 @@ class InpaintingMaskEditor(QDialog):
         # This method is now deprecated - state restoration happens directly in open_inpainting_mask_editor
         pass
 
+    def _relayout_action_cards(self, columns):
+        if not hasattr(self, "toolbar_actions_grid") or not hasattr(self, "action_cards"):
+            return
+
+        columns = max(1, int(columns))
+        visible_cards = [card for card in self.action_cards if card.isVisible()]
+        layout_signature = tuple(id(card) for card in visible_cards)
+        if (
+            getattr(self, "_action_card_columns", None) == columns and
+            getattr(self, "_action_card_layout_signature", None) == layout_signature
+        ):
+            return
+
+        while self.toolbar_actions_grid.count():
+            item = self.toolbar_actions_grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(self.toolbar_actions_grid_host)
+
+        for index, card in enumerate(visible_cards):
+            row = index // columns
+            column = index % columns
+            self.toolbar_actions_grid.addWidget(card, row, column)
+
+        for column in range(columns):
+            self.toolbar_actions_grid.setColumnStretch(column, 1)
+
+        self._action_card_columns = columns
+        self._action_card_layout_signature = layout_signature
+        self.toolbar_actions_grid_host.updateGeometry()
+
     def _apply_responsive_chrome(self):
         if not hasattr(self, "top_toolbar") or not hasattr(self, "toolbar_shell_layout"):
             return
@@ -3369,17 +3488,45 @@ class InpaintingMaskEditor(QDialog):
             self.toolbar_shell_layout.setDirection(QBoxLayout.TopToBottom)
             self.toolbar_shell_layout.setStretch(0, 0)
             self.toolbar_shell_layout.setStretch(1, 0)
-            self.top_toolbar.setMinimumHeight(max(110, int(round(126 * scale))))
-            self.top_toolbar.setMaximumHeight(max(182, int(round(198 * scale))))
         else:
             self.toolbar_shell_layout.setDirection(QBoxLayout.LeftToRight)
             self.toolbar_shell_layout.setStretch(0, 0)
             self.toolbar_shell_layout.setStretch(1, 1)
-            self.top_toolbar.setMinimumHeight(max(82, int(round(92 * scale))))
-            self.top_toolbar.setMaximumHeight(max(132, int(round(136 * scale))))
 
         self.toolbar_controls_panel.setMaximumWidth(max(560, int(width * 0.46)))
         self.toolbar_actions_panel.setMaximumWidth(16777215)
+        actions_width = max(
+            1,
+            self.toolbar_actions_panel.width() if self.toolbar_actions_panel.width() > 0 else width - self.toolbar_controls_panel.maximumWidth()
+        )
+        if compact_toolbar:
+            columns = 1 if width < 1080 else 2
+        else:
+            if actions_width >= 1180:
+                columns = 4
+            elif actions_width >= 860:
+                columns = 3
+            elif actions_width >= 560:
+                columns = 2
+            else:
+                columns = 1
+
+        self._relayout_action_cards(columns)
+
+        visible_cards = [card for card in getattr(self, "action_cards", []) if card.isVisible()]
+        rows = max(1, (len(visible_cards) + columns - 1) // columns)
+        controls_height = self.toolbar_controls_panel.sizeHint().height()
+        actions_height = self.toolbar_actions_grid_host.sizeHint().height()
+        if compact_toolbar:
+            target_height = controls_height + actions_height + max(20, int(round(18 * scale)))
+            self.top_toolbar.setMinimumHeight(target_height)
+            self.top_toolbar.setMaximumHeight(max(target_height, actions_height + controls_height + 24))
+        else:
+            base_height = max(controls_height, actions_height)
+            if rows > 1:
+                base_height = max(base_height, int(round(126 * scale)))
+            self.top_toolbar.setMinimumHeight(base_height + max(10, int(round(8 * scale))))
+            self.top_toolbar.setMaximumHeight(max(base_height + 18, int(round((116 if rows == 1 else 154) * scale))))
         self.top_toolbar.updateGeometry()
 
     def resizeEvent(self, event):
