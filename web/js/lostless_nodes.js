@@ -6,6 +6,40 @@ const RANDOMIZE_BUTTON_NODE = "LostlessRandomizeButton";
 const LOOP_CUT_PLANNER_NODE = "LostlessLoopCutPlanner";
 const LOOP_CUTTER_NODE = "LostlessLoopCutter";
 const MASK_EDITOR_NODE = "MaskEditor";
+const IMAGE_TO_MASK_NODE = "WANVaceImageToMask";
+
+const LOSTLESS_STYLED_NODE_TYPES = new Set([
+  RANDOM_IMAGE_NODE,
+  RANDOMIZE_BUTTON_NODE,
+  "LostlessBufferNode",
+  LOOP_CUT_PLANNER_NODE,
+  "LostlessLoopCutTask",
+  "LostlessLoopApplyCutPlan",
+  LOOP_CUTTER_NODE,
+  MASK_EDITOR_NODE,
+  IMAGE_TO_MASK_NODE,
+]);
+
+const LOSTLESS_NODE_THEME = Object.freeze({
+  titleBg: "#070707",
+  bodyBg: "#000000",
+  accent: "#f3f3ee",
+  bodyStripe: "rgba(255,255,255,0.075)",
+  titleStripe: "rgba(255,255,255,0.13)",
+  divider: "rgba(255,255,255,0.08)",
+  outline: "rgba(255,255,255,0.06)",
+  buttonFillTop: "#111114",
+  buttonFillBottom: "#050506",
+  buttonFillActiveTop: "#1a1a1d",
+  buttonFillActiveBottom: "#0a0a0c",
+  buttonBorder: "rgba(255,255,255,0.26)",
+  buttonBorderActive: "rgba(255,255,255,0.42)",
+  buttonStripe: "rgba(255,255,255,0.18)",
+  buttonText: "#f4f4ef",
+  dangerButtonBorder: "rgba(255,180,180,0.3)",
+  dangerButtonStripe: "rgba(255,180,180,0.2)",
+  dangerButtonText: "#ffe3e3",
+});
 
 function getWidget(node, name) {
   return (node.widgets || []).find((widget) => widget.name === name);
@@ -16,6 +50,450 @@ function markNodeDirty(node) {
   app.graph?.setDirtyCanvas?.(true, true);
 }
 
+function getNodeTitleHeight() {
+  return globalThis.LiteGraph?.NODE_TITLE_HEIGHT || 30;
+}
+
+function drawRoundedRectPath(ctx, x, y, width, height, radius = 10) {
+  if (!(width > 0) || !(height > 0)) {
+    return;
+  }
+
+  const safeRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(x, y, width, height, safeRadius);
+    return;
+  }
+
+  ctx.moveTo(x + safeRadius, y);
+  ctx.lineTo(x + width - safeRadius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  ctx.lineTo(x + width, y + height - safeRadius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  ctx.lineTo(x + safeRadius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  ctx.lineTo(x, y + safeRadius);
+  ctx.quadraticCurveTo(x, y, x + safeRadius, y);
+  ctx.closePath();
+}
+
+function drawContourField(ctx, config) {
+  const {
+    anchorX,
+    anchorY,
+    baseRadius = 12,
+    spacing = 10,
+    count = 8,
+    startAngle = 0,
+    endAngle = Math.PI,
+    stretchX = 1,
+    stretchY = 1,
+    color = LOSTLESS_NODE_THEME.bodyStripe,
+    lineWidth = 2,
+  } = config;
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = "round";
+
+  const steps = 28;
+  for (let i = 0; i < count; i += 1) {
+    const radius = baseRadius + i * spacing;
+    ctx.beginPath();
+    for (let step = 0; step <= steps; step += 1) {
+      const t = step / steps;
+      const angle = startAngle + (endAngle - startAngle) * t;
+      const px = anchorX + Math.cos(angle) * radius * stretchX;
+      const py = anchorY + Math.sin(angle) * radius * stretchY;
+      if (step === 0) {
+        ctx.moveTo(px, py);
+      } else {
+        ctx.lineTo(px, py);
+      }
+    }
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function resizeNodeToContent(node, minWidth = 0) {
+  const nextSize = node.computeSize?.();
+  if (!Array.isArray(nextSize)) {
+    return;
+  }
+
+  const currentSize = Array.isArray(node.size) ? node.size : [0, 0];
+  const width = Math.max(currentSize[0] || 0, nextSize[0] || 0, minWidth || 0);
+  const height = Math.max(currentSize[1] || 0, nextSize[1] || 0);
+
+  if (typeof node.setSize === "function") {
+    node.setSize([width, height]);
+  } else {
+    node.size = [width, height];
+  }
+}
+
+function drawLostlessNodeChrome(node, ctx) {
+  if (!ctx || !Array.isArray(node?.size) || node.flags?.collapsed) {
+    return;
+  }
+
+  const [width, height] = node.size;
+  if (!(width > 24) || !(height > 24)) {
+    return;
+  }
+
+  const titleHeight = Math.min(getNodeTitleHeight(), Math.max(12, height - 4));
+  const bodyTop = Math.min(height - 4, titleHeight + 1);
+  const bodyHeight = Math.max(0, height - bodyTop - 3);
+
+  if (bodyHeight > 12) {
+    ctx.save();
+    drawRoundedRectPath(ctx, 3, bodyTop, width - 6, bodyHeight, 14);
+    ctx.clip();
+
+    const glow = ctx.createLinearGradient(0, bodyTop, 0, bodyTop + bodyHeight);
+    glow.addColorStop(0, "rgba(255,255,255,0.03)");
+    glow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(3, bodyTop, width - 6, bodyHeight);
+
+    drawContourField(ctx, {
+      anchorX: width * 0.1,
+      anchorY: bodyTop + bodyHeight + 12,
+      baseRadius: 14,
+      spacing: 12,
+      count: 11,
+      startAngle: -Math.PI * 0.72,
+      endAngle: Math.PI * 0.06,
+      stretchX: 1.16,
+      stretchY: 0.92,
+      color: LOSTLESS_NODE_THEME.bodyStripe,
+      lineWidth: 2,
+    });
+    drawContourField(ctx, {
+      anchorX: width * 0.9,
+      anchorY: bodyTop - 10,
+      baseRadius: 14,
+      spacing: 12,
+      count: 10,
+      startAngle: Math.PI * 0.9,
+      endAngle: Math.PI * 1.62,
+      stretchX: 1.16,
+      stretchY: 0.92,
+      color: LOSTLESS_NODE_THEME.bodyStripe,
+      lineWidth: 2,
+    });
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = LOSTLESS_NODE_THEME.divider;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(10, bodyTop + 0.5);
+    ctx.lineTo(width - 10, bodyTop + 0.5);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  const titleClipX = Math.max(72, width * 0.54);
+  const titleClipWidth = width - titleClipX - 4;
+  if (titleClipWidth > 24 && titleHeight > 12) {
+    ctx.save();
+    drawRoundedRectPath(ctx, titleClipX, 2, titleClipWidth, titleHeight - 3, 10);
+    ctx.clip();
+    drawContourField(ctx, {
+      anchorX: width + 10,
+      anchorY: titleHeight * 0.1,
+      baseRadius: 7,
+      spacing: 6,
+      count: 7,
+      startAngle: Math.PI * 0.92,
+      endAngle: Math.PI * 1.54,
+      stretchX: 1.24,
+      stretchY: 0.9,
+      color: LOSTLESS_NODE_THEME.titleStripe,
+      lineWidth: 1.3,
+    });
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.strokeStyle = LOSTLESS_NODE_THEME.outline;
+  ctx.lineWidth = 1;
+  drawRoundedRectPath(ctx, 1.5, 1.5, width - 3, height - 3, 15);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function applyLostlessNodeChrome(node) {
+  if (!node) {
+    return;
+  }
+
+  node.color = LOSTLESS_NODE_THEME.titleBg;
+  node.bgcolor = LOSTLESS_NODE_THEME.bodyBg;
+  node.boxcolor = LOSTLESS_NODE_THEME.accent;
+
+  if (!node.__lostlessChromeWrapped) {
+    const onDrawForeground = node.onDrawForeground;
+    node.onDrawForeground = function () {
+      drawLostlessNodeChrome(this, arguments[0]);
+      return onDrawForeground?.apply(this, arguments);
+    };
+    node.__lostlessChromeWrapped = true;
+  }
+}
+
+function drawLostlessActionButtonSurface(ctx, config) {
+  const {
+    x,
+    y,
+    width,
+    height,
+    label,
+    pressed = false,
+    danger = false,
+  } = config;
+
+  if (!(width > 0) || !(height > 0)) {
+    return;
+  }
+
+  const fill = ctx.createLinearGradient(0, y, 0, y + height);
+  fill.addColorStop(0, pressed ? LOSTLESS_NODE_THEME.buttonFillActiveTop : LOSTLESS_NODE_THEME.buttonFillTop);
+  fill.addColorStop(1, pressed ? LOSTLESS_NODE_THEME.buttonFillActiveBottom : LOSTLESS_NODE_THEME.buttonFillBottom);
+
+  ctx.save();
+  drawRoundedRectPath(ctx, x, y, width, height, 12);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.clip();
+  drawContourField(ctx, {
+    anchorX: x + width * 0.1,
+    anchorY: y + height + 10,
+    baseRadius: 8,
+    spacing: 7,
+    count: 8,
+    startAngle: -Math.PI * 0.72,
+    endAngle: Math.PI * 0.06,
+    stretchX: 1.18,
+    stretchY: 0.9,
+    color: danger ? LOSTLESS_NODE_THEME.dangerButtonStripe : LOSTLESS_NODE_THEME.buttonStripe,
+    lineWidth: 1.6,
+  });
+  drawContourField(ctx, {
+    anchorX: x + width * 0.86,
+    anchorY: y - 8,
+    baseRadius: 8,
+    spacing: 7,
+    count: 6,
+    startAngle: Math.PI * 0.9,
+    endAngle: Math.PI * 1.55,
+    stretchX: 1.18,
+    stretchY: 0.88,
+    color: danger ? LOSTLESS_NODE_THEME.dangerButtonStripe : LOSTLESS_NODE_THEME.buttonStripe,
+    lineWidth: 1.4,
+  });
+  ctx.restore();
+
+  ctx.save();
+  drawRoundedRectPath(ctx, x, y, width, height, 12);
+  ctx.strokeStyle = pressed
+    ? LOSTLESS_NODE_THEME.buttonBorderActive
+    : danger
+      ? LOSTLESS_NODE_THEME.dangerButtonBorder
+      : LOSTLESS_NODE_THEME.buttonBorder;
+  ctx.lineWidth = 1.1;
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.fillStyle = danger ? LOSTLESS_NODE_THEME.dangerButtonText : LOSTLESS_NODE_THEME.buttonText;
+  ctx.font = `${label.length > 18 ? "600 12px" : "600 13px"} sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, x + width / 2, y + height / 2 + 0.5);
+  ctx.restore();
+}
+
+function addLostlessActionButton(node, label, callback, options = {}) {
+  const {
+    height = 36,
+    minWidth = 0,
+    variant = "primary",
+  } = options;
+
+  if (minWidth > 0) {
+    node.__lostlessMinWidth = Math.max(node.__lostlessMinWidth || 0, minWidth);
+  }
+
+  const button = node.addWidget("button", label, "", callback, { serialize: false });
+  button.type = "lostless_button";
+  button.options = {
+    ...(button.options || {}),
+    serialize: false,
+    lostlessHeight: height,
+    lostlessVariant: variant,
+  };
+  button.computeSize = function (width) {
+    return [Math.max(width || 0, node.__lostlessMinWidth || 0), this.options?.lostlessHeight || 36];
+  };
+  button.draw = function (ctx, currentNode, widgetWidth, y) {
+    const buttonHeight = this.options?.lostlessHeight || 36;
+    this.last_y = y;
+    this.height = buttonHeight;
+    drawLostlessActionButtonSurface(ctx, {
+      x: 8,
+      y: y + 1,
+      width: Math.max(0, widgetWidth - 16),
+      height: buttonHeight - 2,
+      label: this.name,
+      pressed: (this.__lostlessPressedUntil || 0) > Date.now(),
+      danger: this.options?.lostlessVariant === "danger",
+    });
+  };
+  button.mouse = function (event, _pos, currentNode) {
+    const eventType = String(event?.type || "");
+    if (eventType !== "mousedown" && eventType !== "pointerdown") {
+      return false;
+    }
+
+    this.__lostlessPressedUntil = Date.now() + 180;
+    markNodeDirty(currentNode);
+    setTimeout(() => {
+      markNodeDirty(currentNode);
+    }, 190);
+
+    try {
+      const result = this.callback?.(this, app.canvas, currentNode, currentNode.pos, event);
+      Promise.resolve(result).catch((error) => {
+        console.error(`Lostless button '${this.name}' error:`, error);
+      });
+    } catch (error) {
+      console.error(`Lostless button '${this.name}' error:`, error);
+    }
+
+    return true;
+  };
+
+  return button;
+}
+
+function addLostlessActionButtonRow(node, buttons, options = {}) {
+  const {
+    height = 44,
+    minWidth = 0,
+    gap = 8,
+  } = options;
+
+  if (minWidth > 0) {
+    node.__lostlessMinWidth = Math.max(node.__lostlessMinWidth || 0, minWidth);
+  }
+
+  const rowWidget = node.addWidget("button", "__lostless_button_row__", "", () => {}, { serialize: false });
+  rowWidget.type = "lostless_button_row";
+  rowWidget.options = {
+    ...(rowWidget.options || {}),
+    serialize: false,
+    lostlessHeight: height,
+    lostlessGap: gap,
+  };
+  rowWidget.__lostlessButtons = buttons.map((button) => ({
+    weight: 1,
+    variant: "primary",
+    ...button,
+  }));
+  rowWidget.computeSize = function (width) {
+    return [Math.max(width || 0, node.__lostlessMinWidth || 0), this.options?.lostlessHeight || 44];
+  };
+  rowWidget.draw = function (ctx, currentNode, widgetWidth, y) {
+    const rowHeight = this.options?.lostlessHeight || 44;
+    const padding = 8;
+    const gapSize = this.options?.lostlessGap || 8;
+    const buttonsData = this.__lostlessButtons || [];
+    const totalWeight = buttonsData.reduce((sum, button) => sum + (button.weight || 1), 0) || 1;
+    const usableWidth = Math.max(0, widgetWidth - padding * 2 - gapSize * Math.max(0, buttonsData.length - 1));
+
+    this.last_y = y;
+    this.height = rowHeight;
+    this.__lostlessButtonBounds = [];
+
+    let cursorX = padding;
+    let usedWidth = 0;
+    buttonsData.forEach((button, index) => {
+      const remainingButtons = buttonsData.length - index - 1;
+      const buttonWidth = remainingButtons === 0
+        ? Math.max(0, usableWidth - usedWidth)
+        : Math.max(0, Math.round((usableWidth * (button.weight || 1)) / totalWeight));
+
+      const rect = {
+        x: cursorX,
+        y: y + 1,
+        width: buttonWidth,
+        height: rowHeight - 2,
+      };
+
+      drawLostlessActionButtonSurface(ctx, {
+        ...rect,
+        label: button.label,
+        pressed: (button.__lostlessPressedUntil || 0) > Date.now(),
+        danger: button.variant === "danger",
+      });
+
+      this.__lostlessButtonBounds.push({
+        x: rect.x,
+        y: 1,
+        width: rect.width,
+        height: rect.height,
+        button,
+      });
+
+      usedWidth += buttonWidth;
+      cursorX += buttonWidth + gapSize;
+    });
+  };
+  rowWidget.mouse = function (event, pos, currentNode) {
+    const eventType = String(event?.type || "");
+    if (eventType !== "mousedown" && eventType !== "pointerdown") {
+      return false;
+    }
+
+    const localX = pos?.[0] ?? 0;
+    const localY = (pos?.[1] ?? 0) - (this.last_y || 0);
+    const target = (this.__lostlessButtonBounds || []).find((bound) => (
+      localX >= bound.x
+      && localX <= bound.x + bound.width
+      && localY >= bound.y
+      && localY <= bound.y + bound.height
+    ));
+    if (!target) {
+      return false;
+    }
+
+    target.button.__lostlessPressedUntil = Date.now() + 180;
+    markNodeDirty(currentNode);
+    setTimeout(() => {
+      markNodeDirty(currentNode);
+    }, 190);
+
+    try {
+      const result = target.button.callback?.(target.button, app.canvas, currentNode, currentNode.pos, event);
+      Promise.resolve(result).catch((error) => {
+        console.error(`Lostless button '${target.button.label}' error:`, error);
+      });
+    } catch (error) {
+      console.error(`Lostless button '${target.button.label}' error:`, error);
+    }
+
+    return true;
+  };
+
+  return rowWidget;
+}
 function isLegacyProjectDataName(name) {
   const normalized = String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   return normalized === "projectdata" || normalized.startsWith("projectdata");
@@ -279,6 +757,7 @@ function applyPreview(node, blob) {
     node.imgs = [img];
     node.imageIndex = 0;
     node.setSizeForImage?.();
+    resizeNodeToContent(node, node.__lostlessMinWidth || 0);
     node.setDirtyCanvas?.(true, true);
     app.graph?.setDirtyCanvas?.(true, true);
   };
@@ -1207,6 +1686,27 @@ async function openLoopCutPlanner(node) {
 app.registerExtension({
   name: "comfyui.lostless.nodes",
   async beforeRegisterNodeDef(nodeType, nodeData) {
+    if (LOSTLESS_STYLED_NODE_TYPES.has(nodeData.name)) {
+      const onNodeCreated = nodeType.prototype.onNodeCreated;
+      const onConfigure = nodeType.prototype.onConfigure;
+
+      nodeType.prototype.onNodeCreated = function () {
+        const result = onNodeCreated?.apply(this, arguments);
+        applyLostlessNodeChrome(this);
+        resizeNodeToContent(this, this.__lostlessMinWidth || 0);
+        markNodeDirty(this);
+        return result;
+      };
+
+      nodeType.prototype.onConfigure = function () {
+        const result = onConfigure?.apply(this, arguments);
+        applyLostlessNodeChrome(this);
+        resizeNodeToContent(this, this.__lostlessMinWidth || 0);
+        markNodeDirty(this);
+        return result;
+      };
+    }
+
     if (nodeData.name === RANDOM_IMAGE_NODE) {
       const onNodeCreated = nodeType.prototype.onNodeCreated;
       const onConfigure = nodeType.prototype.onConfigure;
@@ -1228,46 +1728,49 @@ app.registerExtension({
           await restoreImageNodePreview(this, force);
         };
 
-        this.addWidget(
-          "button",
-          "Randomize Image",
-          "",
-          async () => {
-            try {
-              await this.lostlessRandomize();
-            } catch (error) {
-              console.error("Lostless random image error:", error);
-            }
-          },
-          { serialize: false }
-        );
+        addLostlessActionButtonRow(
+          this,
+          [
+            {
+              label: "Randomize Image",
+              callback: async () => {
+                try {
+                  await this.lostlessRandomize();
+                } catch (error) {
+                  console.error("Lostless random image error:", error);
+                }
+              },
+              weight: 1.35,
+            },
+            {
+              label: "Load Image",
+              callback: async () => {
+                try {
+                  const selected = await openImagePicker(this);
+                  if (!selected) {
+                    return;
+                  }
 
-        this.addWidget(
-          "button",
-          "Load Image",
-          "",
-          async () => {
-            try {
-              const selected = await openImagePicker(this);
-              if (!selected) {
-                return;
-              }
+                  const selectedFilenameWidget = getWidget(this, "selected_filename");
+                  const selectedPathWidget = getWidget(this, "selected_path");
+                  setWidgetValue(selectedFilenameWidget, selected.filename, this);
+                  setWidgetValue(selectedPathWidget, selected.path, this);
 
-              const selectedFilenameWidget = getWidget(this, "selected_filename");
-              const selectedPathWidget = getWidget(this, "selected_path");
-              setWidgetValue(selectedFilenameWidget, selected.filename, this);
-              setWidgetValue(selectedPathWidget, selected.path, this);
+                  const previewBlob = await fetchPreviewBlob(selected.path);
+                  applyPreview(this, previewBlob);
+                  this.__lostlessPreviewSourcePath = selected.path;
+                  markNodeDirty(this);
+                } catch (error) {
+                  console.error("Lostless load image error:", error);
+                }
+              },
+              weight: 0.95,
+            },
+          ],
+          { height: 44, minWidth: 232, gap: 8 }
+          );
 
-              const previewBlob = await fetchPreviewBlob(selected.path);
-              applyPreview(this, previewBlob);
-              this.__lostlessPreviewSourcePath = selected.path;
-              markNodeDirty(this);
-            } catch (error) {
-              console.error("Lostless load image error:", error);
-            }
-          },
-          { serialize: false }
-        );
+          resizeNodeToContent(this, this.__lostlessMinWidth || 0);
 
         setTimeout(() => {
           this.lostlessRestorePreview?.();
@@ -1287,6 +1790,7 @@ app.registerExtension({
 
     if (nodeData.name === RANDOMIZE_BUTTON_NODE) {
       const onNodeCreated = nodeType.prototype.onNodeCreated;
+
       nodeType.prototype.onNodeCreated = function () {
         const result = onNodeCreated?.apply(this, arguments);
         if (this.__lostless_broadcast_ready) {
@@ -1294,10 +1798,9 @@ app.registerExtension({
         }
         this.__lostless_broadcast_ready = true;
 
-        this.addWidget(
-          "button",
+        addLostlessActionButton(
+          this,
           "Randomize Connected",
-          "",
           async () => {
             const pulseWidget = getWidget(this, "pulse");
             if (pulseWidget && typeof pulseWidget.value === "number") {
@@ -1308,15 +1811,17 @@ app.registerExtension({
             await randomizeConnectedNodes(this);
             markNodeDirty(this);
           },
-          { serialize: false }
+          { height: 44, minWidth: 228 }
         );
 
+        resizeNodeToContent(this, this.__lostlessMinWidth || 0);
         return result;
       };
     }
 
     if (nodeData.name === LOOP_CUT_PLANNER_NODE || nodeData.name === LOOP_CUTTER_NODE) {
       const onNodeCreated = nodeType.prototype.onNodeCreated;
+
       nodeType.prototype.onNodeCreated = function () {
         const result = onNodeCreated?.apply(this, arguments);
         if (this.__lostless_loop_planner_ready) {
@@ -1333,10 +1838,9 @@ app.registerExtension({
         hideWidget(getWidget(this, "cuts_json"));
         hideWidget(getWidget(this, "ui_refresh"));
 
-        this.addWidget(
-          "button",
+        addLostlessActionButton(
+          this,
           nodeData.name === LOOP_CUTTER_NODE ? "Select Frames To Remove" : "Select Loop Cuts",
-          "",
           async () => {
             try {
               await openLoopCutPlanner(this);
@@ -1344,9 +1848,121 @@ app.registerExtension({
               console.error("Lostless loop cut planner error:", error);
             }
           },
-          { serialize: false }
+          { height: 38, minWidth: 238 }
         );
 
+        resizeNodeToContent(this, this.__lostlessMinWidth || 0);
+        return result;
+      };
+    }
+
+    if (nodeData.name === MASK_EDITOR_NODE) {
+      const onNodeCreated = nodeType.prototype.onNodeCreated;
+      const onConfigure = nodeType.prototype.onConfigure;
+      const onExecuted = nodeType.prototype.onExecuted;
+
+      async function refreshMaskEditorMemoryStatus(node) {
+        const statusWidget = node.widgets?.find((widget) => widget.name === "memory_status");
+        const reuseWidget = getWidget(node, "reuse_last_edit");
+        if (!statusWidget) {
+          return;
+        }
+
+        if (!reuseWidget?.value) {
+          statusWidget.value = "Memory: off";
+          markNodeDirty(node);
+          return;
+        }
+
+        try {
+          const { data } = await postJson("/lostless/mask_editor/memory_status", {
+            node_id: node.id,
+          });
+          statusWidget.value = data?.memory_status || "Memory: empty";
+        } catch (error) {
+          console.error("Lostless mask editor memory status error:", error);
+          statusWidget.value = "Memory: unavailable";
+        }
+
+        markNodeDirty(node);
+      }
+
+      nodeType.prototype.onNodeCreated = function () {
+        const result = onNodeCreated?.apply(this, arguments);
+        if (this.__lostless_mask_editor_memory_ready) {
+          return result;
+        }
+        this.__lostless_mask_editor_memory_ready = true;
+        removeLegacyProjectDataSlots(this);
+
+        const reuseWidget = getWidget(this, "reuse_last_edit");
+        const originalCallback = reuseWidget?.callback;
+        if (reuseWidget) {
+          reuseWidget.callback = (...args) => {
+            originalCallback?.apply(reuseWidget, args);
+            refreshMaskEditorMemoryStatus(this);
+          };
+        }
+
+        addLostlessActionButton(
+          this,
+          "Clear Memory",
+          async () => {
+            try {
+              const { data } = await postJson("/lostless/mask_editor/clear_memory", {
+                node_id: this.id,
+              });
+              const statusWidget = this.widgets?.find((widget) => widget.name === "memory_status");
+              if (statusWidget) {
+                statusWidget.value = data?.memory_status || "Memory: empty";
+              }
+              markNodeDirty(this);
+            } catch (error) {
+              console.error("Lostless clear mask editor memory error:", error);
+            }
+          },
+          { height: 36, minWidth: 220, variant: "danger" }
+        );
+
+        const statusWidget = this.addWidget(
+          "text",
+          "memory_status",
+          "Memory: off",
+          () => {},
+          { multiline: false, serialize: false }
+        );
+        statusWidget.disabled = true;
+        makeReadOnly(statusWidget);
+        resizeNodeToContent(this, this.__lostlessMinWidth || 0);
+
+        setTimeout(() => {
+          refreshMaskEditorMemoryStatus(this);
+        }, 0);
+
+        return result;
+      };
+
+      nodeType.prototype.onConfigure = function () {
+        const result = onConfigure?.apply(this, arguments);
+        removeLegacyProjectDataSlots(this);
+        setTimeout(() => {
+          refreshMaskEditorMemoryStatus(this);
+        }, 0);
+        return result;
+      };
+
+      nodeType.prototype.onExecuted = function (message) {
+        const result = onExecuted?.apply(this, arguments);
+        const status = Array.isArray(message?.memory_status) ? message.memory_status[0] : null;
+        const statusWidget = this.widgets?.find((widget) => widget.name === "memory_status");
+        if (statusWidget && typeof status === "string" && status.trim()) {
+          statusWidget.value = status;
+          markNodeDirty(this);
+        } else {
+          setTimeout(() => {
+            refreshMaskEditorMemoryStatus(this);
+          }, 0);
+        }
         return result;
       };
     }
