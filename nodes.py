@@ -50,6 +50,8 @@ def _load_embedded_lostless_mappings():
             if spec is None or spec.loader is None:
                 raise RuntimeError(f"Unable to create import spec for {init_file}")
             module = importlib.util.module_from_spec(spec)
+            # Tell the embedded package to skip loading its broader upstream node surface.
+            module.LOSTLESS_MINIMAL_IMPORT = True
             sys.modules[module_name] = module
             spec.loader.exec_module(module)
 
