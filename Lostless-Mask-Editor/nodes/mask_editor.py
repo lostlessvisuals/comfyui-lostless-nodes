@@ -1484,7 +1484,7 @@ class InpaintingMaskEditor(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
-        QTimer.singleShot(0, self._apply_responsive_chrome)
+        QTimer.singleShot(0, self._finalize_startup_layout)
         if not hasattr(self, '_startup_vertex_sync_done'):
             self._startup_vertex_sync_done = True
             # Sync the startup target to the current slider value once.
@@ -1494,6 +1494,11 @@ class InpaintingMaskEditor(QDialog):
             self.vertex_count_slider.blockSignals(False)
             self.apply_vertex_count_setting(current_vertex_count, persist_setting=True)
             self.normalize_shape_keyframes_to_target_vertices(current_vertex_count)
+
+    def _finalize_startup_layout(self):
+        self._apply_responsive_chrome()
+        if hasattr(self, "mask_widget"):
+            QTimer.singleShot(0, self.mask_widget.reset_view_to_default)
     
     def update_brush_button_icon(self):
         """Update the brush button icon based on current brush mode"""
@@ -4445,7 +4450,8 @@ class MaskDrawingWidget(QWidget):
         
         if self._auto_fit_pending and not self._user_modified_view and self.width() > 0 and self.height() > 0:
             self.fit_to_view()
-            self._auto_fit_pending = False
+            if self.isVisible() and self.window().isVisible():
+                QTimer.singleShot(0, self._finalize_pending_auto_fit)
         
         self.update()
     
@@ -4462,12 +4468,33 @@ class MaskDrawingWidget(QWidget):
         fit_scale = min(self.width() / float(img_w), self.height() / float(img_h))
         self.zoom_level = max(0.05, fit_scale)
         self.pan_offset = QPoint(0, 0)
+
+    def reset_view_to_default(self):
+        """Match the startup viewport to the same fit used by the 0 shortcut."""
+        if self.video_frame is None:
+            return
+        if self.width() <= 0 or self.height() <= 0:
+            return
+        self.fit_to_view()
+        self._user_modified_view = False
+        self._auto_fit_pending = False
+        self.update()
+
+    def _finalize_pending_auto_fit(self):
+        if self._user_modified_view or not self._auto_fit_pending or self.video_frame is None:
+            return
+        if self.width() <= 0 or self.height() <= 0:
+            return
+        if not self.isVisible() or not self.window().isVisible():
+            return
+        self.reset_view_to_default()
     
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._auto_fit_pending and not self._user_modified_view and self.video_frame is not None:
             self.fit_to_view()
-            self._auto_fit_pending = False
+            if self.isVisible() and self.window().isVisible():
+                QTimer.singleShot(0, self._finalize_pending_auto_fit)
     
     def complete_initialization(self):
         """Complete initialization after UI is responsive"""
@@ -8048,9 +8075,7 @@ class MaskDrawingWidget(QWidget):
                     self.parent_editor.zoom_tool_btn.setChecked(True)
             elif event.key() == Qt.Key_0:
                 # Fit frame to view
-                self.fit_to_view()
-                self._user_modified_view = False
-                self.update()
+                self.reset_view_to_default()
             elif event.key() == Qt.Key_Space and not event.isAutoRepeat():
                 # Enable panning while space is held
                 self.space_pressed = True
