@@ -6,6 +6,11 @@ const RANDOMIZE_BUTTON_NODE = "LostlessRandomizeButton";
 const LOOP_CUT_PLANNER_NODE = "LostlessLoopCutPlanner";
 const LOOP_CUTTER_NODE = "LostlessLoopCutter";
 const MASK_EDITOR_NODE = "MaskEditor";
+const RANDOM_PRIMARY_BUTTON_HEIGHT = 40;
+const RANDOM_PRIMARY_BUTTON_MIN_WIDTH = 220;
+const RANDOM_SECONDARY_BUTTON_HEIGHT = 34;
+const RANDOM_IMAGE_NODE_MIN_WIDTH = 260;
+const RANDOMIZE_BUTTON_NODE_MIN_WIDTH = 240;
 
 function getWidget(node, name) {
   return (node.widgets || []).find((widget) => widget.name === name);
@@ -14,6 +19,57 @@ function getWidget(node, name) {
 function markNodeDirty(node) {
   node.setDirtyCanvas?.(true, true);
   app.graph?.setDirtyCanvas?.(true, true);
+}
+
+function getDefaultWidgetHeight() {
+  return globalThis.LiteGraph?.NODE_WIDGET_HEIGHT || 20;
+}
+
+function setWidgetMinimumSize(widget, { minWidth = 0, minHeight = 0 } = {}) {
+  if (!widget) {
+    return widget;
+  }
+
+  const originalComputeSize =
+    typeof widget.computeSize === "function" ? widget.computeSize.bind(widget) : null;
+
+  widget.computeSize = (width) => {
+    const fallbackWidth = Number.isFinite(width) ? width : minWidth;
+    const base = originalComputeSize?.(width);
+    const baseWidth =
+      Array.isArray(base) && Number.isFinite(base[0]) ? base[0] : fallbackWidth;
+    const baseHeight =
+      Array.isArray(base) && Number.isFinite(base[1]) ? base[1] : getDefaultWidgetHeight();
+
+    return [Math.max(baseWidth, minWidth), Math.max(baseHeight, minHeight)];
+  };
+
+  widget.options = {
+    ...(widget.options || {}),
+    minWidth: Math.max(Number(widget.options?.minWidth) || 0, minWidth),
+    minHeight: Math.max(Number(widget.options?.minHeight) || 0, minHeight),
+  };
+
+  return widget;
+}
+
+function fitNodeToWidgets(node, minWidth = 0) {
+  if (!node || typeof node.computeSize !== "function" || typeof node.setSize !== "function") {
+    return;
+  }
+
+  const nextSize = node.computeSize();
+  if (!Array.isArray(nextSize)) {
+    return;
+  }
+
+  const currentWidth = Array.isArray(node.size) ? node.size[0] || 0 : 0;
+  const currentHeight = Array.isArray(node.size) ? node.size[1] || 0 : 0;
+  node.setSize([
+    Math.max(currentWidth, nextSize[0] || 0, minWidth),
+    Math.max(currentHeight, nextSize[1] || 0),
+  ]);
+  markNodeDirty(node);
 }
 
 function isLegacyProjectDataName(name) {
@@ -279,6 +335,9 @@ function applyPreview(node, blob) {
     node.imgs = [img];
     node.imageIndex = 0;
     node.setSizeForImage?.();
+    if (node.type === RANDOM_IMAGE_NODE || node.comfyClass === RANDOM_IMAGE_NODE) {
+      fitNodeToWidgets(node, RANDOM_IMAGE_NODE_MIN_WIDTH);
+    }
     node.setDirtyCanvas?.(true, true);
     app.graph?.setDirtyCanvas?.(true, true);
   };
@@ -1228,7 +1287,7 @@ app.registerExtension({
           await restoreImageNodePreview(this, force);
         };
 
-        this.addWidget(
+        const randomizeWidget = this.addWidget(
           "button",
           "Randomize Image",
           "",
@@ -1241,8 +1300,12 @@ app.registerExtension({
           },
           { serialize: false }
         );
+        setWidgetMinimumSize(randomizeWidget, {
+          minWidth: RANDOM_PRIMARY_BUTTON_MIN_WIDTH,
+          minHeight: RANDOM_PRIMARY_BUTTON_HEIGHT,
+        });
 
-        this.addWidget(
+        const loadImageWidget = this.addWidget(
           "button",
           "Load Image",
           "",
@@ -1268,8 +1331,13 @@ app.registerExtension({
           },
           { serialize: false }
         );
+        setWidgetMinimumSize(loadImageWidget, {
+          minWidth: RANDOM_PRIMARY_BUTTON_MIN_WIDTH,
+          minHeight: RANDOM_SECONDARY_BUTTON_HEIGHT,
+        });
 
         setTimeout(() => {
+          fitNodeToWidgets(this, RANDOM_IMAGE_NODE_MIN_WIDTH);
           this.lostlessRestorePreview?.();
         }, 0);
 
@@ -1279,6 +1347,7 @@ app.registerExtension({
       nodeType.prototype.onConfigure = function () {
         const result = onConfigure?.apply(this, arguments);
         setTimeout(() => {
+          fitNodeToWidgets(this, RANDOM_IMAGE_NODE_MIN_WIDTH);
           this.lostlessRestorePreview?.();
         }, 0);
         return result;
@@ -1287,6 +1356,7 @@ app.registerExtension({
 
     if (nodeData.name === RANDOMIZE_BUTTON_NODE) {
       const onNodeCreated = nodeType.prototype.onNodeCreated;
+      const onConfigure = nodeType.prototype.onConfigure;
       nodeType.prototype.onNodeCreated = function () {
         const result = onNodeCreated?.apply(this, arguments);
         if (this.__lostless_broadcast_ready) {
@@ -1294,7 +1364,7 @@ app.registerExtension({
         }
         this.__lostless_broadcast_ready = true;
 
-        this.addWidget(
+        const randomizeConnectedWidget = this.addWidget(
           "button",
           "Randomize Connected",
           "",
@@ -1310,7 +1380,22 @@ app.registerExtension({
           },
           { serialize: false }
         );
+        setWidgetMinimumSize(randomizeConnectedWidget, {
+          minWidth: RANDOM_PRIMARY_BUTTON_MIN_WIDTH,
+          minHeight: RANDOM_PRIMARY_BUTTON_HEIGHT,
+        });
+        setTimeout(() => {
+          fitNodeToWidgets(this, RANDOMIZE_BUTTON_NODE_MIN_WIDTH);
+        }, 0);
 
+        return result;
+      };
+
+      nodeType.prototype.onConfigure = function () {
+        const result = onConfigure?.apply(this, arguments);
+        setTimeout(() => {
+          fitNodeToWidgets(this, RANDOMIZE_BUTTON_NODE_MIN_WIDTH);
+        }, 0);
         return result;
       };
     }
