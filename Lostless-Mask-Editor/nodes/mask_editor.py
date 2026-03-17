@@ -2002,13 +2002,17 @@ class InpaintingMaskEditor(QDialog):
             queued_frames = self._queue_navigation_carry_frames(index)
             if (
                 queued_frames and
-                self.drawing_mode == "brush" and
-                getattr(self.mask_widget, "is_drawing", False) and
-                getattr(self.mask_widget, "_pixel_brush_transaction", None) is not None
+                self.drawing_mode in ["brush", "shape"] and
+                self._has_live_navigation_delta_source()
             ):
-                if hasattr(self.mask_widget, "capture_pixel_brush_frames"):
+                frames_to_apply = queued_frames
+                if self.drawing_mode == "shape":
+                    source_frame = self._recent_brush_navigation_source_frame
+                    if source_frame is not None and int(self.current_frame_index) == int(source_frame):
+                        frames_to_apply = [int(source_frame)] + queued_frames
+                if self.drawing_mode == "brush" and hasattr(self.mask_widget, "capture_pixel_brush_frames"):
                     self.mask_widget.capture_pixel_brush_frames(queued_frames)
-                self._propagate_active_brush_mask(queued_frames, capture_undo=False)
+                self._propagate_active_brush_mask(frames_to_apply, capture_undo=False)
                 pending_frames = getattr(self, "_recent_brush_navigation_pending_frames", set())
                 pending_frames.difference_update(queued_frames)
                 self._recent_brush_navigation_pending_frames = pending_frames
@@ -2083,6 +2087,27 @@ class InpaintingMaskEditor(QDialog):
         self._recent_brush_navigation_source_frame = None
         self._recent_brush_navigation_last_frame = None
         self._recent_brush_navigation_pending_frames = set()
+
+    def _has_live_navigation_delta_source(self):
+        if not hasattr(self, "mask_widget"):
+            return False
+
+        if self.drawing_mode == "brush":
+            return (
+                getattr(self.mask_widget, "is_drawing", False) and
+                getattr(self.mask_widget, "_pixel_brush_transaction", None) is not None
+            )
+
+        if self.drawing_mode == "shape":
+            temp_shape_mask = getattr(self.mask_widget, "temp_shape_mask", None)
+            return (
+                getattr(self.mask_widget, "is_drawing", False) and
+                temp_shape_mask is not None and
+                temp_shape_mask.size > 0 and
+                np.any(temp_shape_mask > 0)
+            )
+
+        return False
 
     def remember_recent_brush_navigation_mask(self, mask=None, delta=None):
         if self.drawing_mode not in ["brush", "shape", "liquify"]:
@@ -2160,11 +2185,9 @@ class InpaintingMaskEditor(QDialog):
 
     def _seed_navigation_delta_from_visible_mask(self):
         if self._recent_brush_navigation_delta is not None:
-            if self.drawing_mode == "brush":
-                transaction = getattr(self.mask_widget, "_pixel_brush_transaction", None)
-                if not getattr(self.mask_widget, "is_drawing", False) or transaction is None:
-                    self.clear_recent_brush_navigation_mask()
-                    return False
+            if self.drawing_mode in ["brush", "shape"] and not self._has_live_navigation_delta_source():
+                self.clear_recent_brush_navigation_mask()
+                return False
             return True
         if self.drawing_mode not in ["brush", "shape", "liquify"]:
             return False
@@ -2173,8 +2196,16 @@ class InpaintingMaskEditor(QDialog):
         if not (0 <= self.current_frame_index < len(self.mask_frames)):
             return False
 
+        if self.drawing_mode == "shape" and self._has_live_navigation_delta_source():
+            temp_shape_mask = getattr(self.mask_widget, "temp_shape_mask", None)
+            visible_mask = self.mask_widget.mask
+            if temp_shape_mask is None or visible_mask is None:
+                return False
+            combined_mask = np.maximum(visible_mask, temp_shape_mask)
+            return self.remember_recent_brush_navigation_mask(combined_mask, delta=temp_shape_mask)
+
         stored_mask = None
-        if self.drawing_mode == "brush" and getattr(self.mask_widget, "is_drawing", False):
+        if self.drawing_mode == "brush" and self._has_live_navigation_delta_source():
             transaction = getattr(self.mask_widget, "_pixel_brush_transaction", None)
             if transaction is not None:
                 stored_mask = transaction.get("mask_frames", {}).get(int(self.current_frame_index))
@@ -4722,6 +4753,8 @@ class MaskDrawingWidget(QWidget):
                         self.check_vertex_selection(event.pos())
                     elif self.shape_eraser_mode:
                         # Start shape eraser stroke - similar to shape drawing
+                        if self.parent_editor:
+                            self.parent_editor.clear_recent_brush_navigation_mask()
                         self.is_drawing = True
                         self.current_stroke_points = []
                         self.last_point = event.pos()
@@ -4737,6 +4770,8 @@ class MaskDrawingWidget(QWidget):
                             cv2.circle(self.temp_shape_mask, tuple(map(int, img_coords)), self.brush_size, 255, -1)
                     else:
                         # Start drawing a shape like regular brush
+                        if self.parent_editor:
+                            self.parent_editor.clear_recent_brush_navigation_mask()
                         self.is_drawing = True
                         self.last_point = event.pos()
                         self.current_stroke_points = []
@@ -4991,7 +5026,11 @@ class MaskDrawingWidget(QWidget):
 
                 if self.drawing_mode == "brush" and not action_performed:
                     self.commit_pixel_brush_transaction()
-                if self.parent_editor and not getattr(self.parent_editor, "_recent_brush_navigation_pending_frames", None):
+                if (
+                    self.parent_editor and
+                    self.drawing_mode in ["brush", "shape"] and
+                    not getattr(self.parent_editor, "_recent_brush_navigation_pending_frames", None)
+                ):
                     self.parent_editor.clear_recent_brush_navigation_mask()
             elif self.selected_vertex_index is not None:
                 # Save state after warping vertex
@@ -5281,7 +5320,6 @@ class MaskDrawingWidget(QWidget):
                         self.parent_editor.timeline_widget.mask_frames.discard(frame)
                     self.parent_editor.timeline_widget.update()
                     self.parent_editor.update_navigation_buttons()
-                    self.parent_editor.remember_recent_brush_navigation_mask(self.mask.copy(), delta=filled_mask.copy())
                 
                 self.temp_shape_mask = None
                 return
@@ -5380,7 +5418,6 @@ class MaskDrawingWidget(QWidget):
                     self.parent_editor.timeline_widget.mask_frames.discard(frame)
                 self.parent_editor.timeline_widget.update()
                 self.parent_editor.update_navigation_buttons()
-                self.parent_editor.remember_recent_brush_navigation_mask(self.mask.copy(), delta=filled_mask.copy())
             
             # Clear temp mask
             self.temp_shape_mask = None
