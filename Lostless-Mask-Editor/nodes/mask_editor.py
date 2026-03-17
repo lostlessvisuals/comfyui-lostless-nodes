@@ -1999,7 +1999,19 @@ class InpaintingMaskEditor(QDialog):
 
         if propagate_brush_mask:
             self._seed_navigation_delta_from_visible_mask()
-            self._queue_navigation_carry_frames(index)
+            queued_frames = self._queue_navigation_carry_frames(index)
+            if (
+                queued_frames and
+                self.drawing_mode == "brush" and
+                getattr(self.mask_widget, "is_drawing", False) and
+                getattr(self.mask_widget, "_pixel_brush_transaction", None) is not None
+            ):
+                if hasattr(self.mask_widget, "capture_pixel_brush_frames"):
+                    self.mask_widget.capture_pixel_brush_frames(queued_frames)
+                self._propagate_active_brush_mask(queued_frames, capture_undo=False)
+                pending_frames = getattr(self, "_recent_brush_navigation_pending_frames", set())
+                pending_frames.difference_update(queued_frames)
+                self._recent_brush_navigation_pending_frames = pending_frames
         
         self.current_frame_index = index
         if self._should_propagate_active_brush_mask():
@@ -2220,7 +2232,7 @@ class InpaintingMaskEditor(QDialog):
             self._recent_brush_navigation_delta is not None
         )
 
-    def _propagate_active_brush_mask(self, frame_indices):
+    def _propagate_active_brush_mask(self, frame_indices, capture_undo=True):
         if not self._should_propagate_active_brush_mask():
             return False
 
@@ -2255,11 +2267,13 @@ class InpaintingMaskEditor(QDialog):
                 )
                 if frame not in valid_frames and mask is not None
             }
-        state = self.mask_widget._capture_state(
-            description="Propagate brush mask",
-            full_snapshot=False,
-            affected_frames=valid_frames + list(boundary_masks.keys()),
-        )
+        state = None
+        if capture_undo:
+            state = self.mask_widget._capture_state(
+                description="Propagate brush mask",
+                full_snapshot=False,
+                affected_frames=valid_frames + list(boundary_masks.keys()),
+            )
 
         changed = False
 
@@ -2283,9 +2297,10 @@ class InpaintingMaskEditor(QDialog):
         if not changed:
             return False
 
-        state["frame"] = int(self.current_frame_index)
-        state["mask"] = self.mask_widget.mask.copy() if getattr(self.mask_widget, "mask", None) is not None else None
-        self.mask_widget._push_undo_snapshot(state)
+        if capture_undo:
+            state["frame"] = int(self.current_frame_index)
+            state["mask"] = self.mask_widget.mask.copy() if getattr(self.mask_widget, "mask", None) is not None else None
+            self.mask_widget._push_undo_snapshot(state)
 
         if self.drawing_mode in ["shape", "liquify"] and hasattr(self.mask_widget, "shape_keyframes"):
             source_frame = self._recent_brush_navigation_source_frame
