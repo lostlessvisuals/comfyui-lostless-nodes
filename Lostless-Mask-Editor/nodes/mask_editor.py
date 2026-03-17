@@ -631,7 +631,7 @@ class InpaintingMaskEditor(QDialog):
         toolbar_actions_grid.setContentsMargins(0, 0, 0, 0)
         toolbar_actions_grid.setHorizontalSpacing(action_card_spacing)
         toolbar_actions_grid.setVerticalSpacing(action_card_spacing)
-        toolbar_actions_layout.addWidget(toolbar_actions_grid)
+        toolbar_actions_layout.addWidget(toolbar_actions_grid_host)
 
         toolbar_controls_panel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         toolbar_actions_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
