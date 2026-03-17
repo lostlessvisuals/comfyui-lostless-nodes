@@ -558,6 +558,7 @@ class InpaintingMaskEditor(QDialog):
         self.enable_smooth_interpolation = True
         self.enable_smooth_shapes = True
         self._recent_brush_navigation_mask = None
+        self._recent_brush_navigation_delta = None
         self._recent_brush_navigation_source_frame = None
         
         self.init_ui()
@@ -1117,6 +1118,7 @@ class InpaintingMaskEditor(QDialog):
             title_label = QLabel(title)
             title_label.setObjectName(f"{object_name}_title")
             title_label.setStyleSheet(card_title_style)
+            title_label.setAlignment(Qt.AlignCenter)
             title_label.setWordWrap(False)
             card_layout.addWidget(title_label)
 
@@ -2055,9 +2057,10 @@ class InpaintingMaskEditor(QDialog):
 
     def clear_recent_brush_navigation_mask(self):
         self._recent_brush_navigation_mask = None
+        self._recent_brush_navigation_delta = None
         self._recent_brush_navigation_source_frame = None
 
-    def remember_recent_brush_navigation_mask(self, mask=None):
+    def remember_recent_brush_navigation_mask(self, mask=None, delta=None):
         if self.drawing_mode != "brush":
             self.clear_recent_brush_navigation_mask()
             return False
@@ -2074,7 +2077,14 @@ class InpaintingMaskEditor(QDialog):
             self.clear_recent_brush_navigation_mask()
             return False
 
+        source_delta = None
+        if delta is not None:
+            source_delta = delta.copy()
+            if source_delta.size == 0 or not np.any(source_delta > 0):
+                source_delta = None
+
         self._recent_brush_navigation_mask = source_mask
+        self._recent_brush_navigation_delta = source_delta
         self._recent_brush_navigation_source_frame = int(self.current_frame_index)
         return True
 
@@ -2082,7 +2092,7 @@ class InpaintingMaskEditor(QDialog):
         return (
             self.drawing_mode == "brush" and
             getattr(self.mask_widget, "current_tool", None) == "brush" and
-            self._recent_brush_navigation_mask is not None
+            self._recent_brush_navigation_delta is not None
         )
 
     def _propagate_active_brush_mask(self, frame_indices):
@@ -2108,7 +2118,7 @@ class InpaintingMaskEditor(QDialog):
             affected_frames=[current_frame] + valid_frames,
         )
 
-        current_mask = self._recent_brush_navigation_mask.copy()
+        current_mask = self._recent_brush_navigation_delta.copy()
         changed = False
         for frame_i in valid_frames:
             existing_mask = self.mask_frames[frame_i]
@@ -2226,7 +2236,10 @@ class InpaintingMaskEditor(QDialog):
         else:
             # In pixel mode, fill the pixel data
             self.mask_frames[self.current_frame_index] = np.ones_like(self.mask_frames[self.current_frame_index]) * 255
-            self.remember_recent_brush_navigation_mask(self.mask_frames[self.current_frame_index])
+            self.remember_recent_brush_navigation_mask(
+                self.mask_frames[self.current_frame_index],
+                delta=self.mask_frames[self.current_frame_index],
+            )
         self.update_display()
         # Restore focus to mask widget for keyboard shortcuts
         self.mask_widget.setFocus()
@@ -3549,10 +3562,10 @@ class InpaintingMaskEditor(QDialog):
         self.toolbar_shell_layout.setStretch(0, 0)
         self.toolbar_shell_layout.setStretch(1, 1)
 
-        self.toolbar_controls_panel.setMaximumWidth(max(420, int(width * 0.34)))
+        self.toolbar_controls_panel.setMaximumWidth(max(360, int(width * 0.30)))
         self.toolbar_actions_panel.setMaximumWidth(16777215)
         if hasattr(self, "toolbar_actions_scroll"):
-            max_actions_height = max(64, min(int(height * 0.18), int(round(132 * scale))))
+            max_actions_height = max(88, min(int(height * 0.26), int(round(190 * scale))))
             self.toolbar_actions_scroll.setMinimumHeight(0)
             self.toolbar_actions_scroll.setMaximumHeight(max_actions_height)
 
@@ -3564,13 +3577,11 @@ class InpaintingMaskEditor(QDialog):
             if self.toolbar_actions_panel.width() > 0
             else width - self.toolbar_controls_panel.maximumWidth()
         )
-        if actions_width >= 960:
-            columns = 5
-        elif actions_width >= 760:
+        if actions_width >= 1120:
             columns = 4
-        elif actions_width >= 560:
+        elif actions_width >= 820:
             columns = 3
-        elif actions_width >= 360:
+        elif actions_width >= 520:
             columns = 2
         else:
             columns = 1
@@ -3584,11 +3595,11 @@ class InpaintingMaskEditor(QDialog):
         visible_actions_height = min(actions_height, getattr(self.toolbar_actions_scroll, "maximumHeight", lambda: actions_height)())
         base_height = max(controls_height, visible_actions_height)
         if compact_toolbar and rows > 1:
-            base_height = max(base_height, int(round(98 * scale)))
+            base_height = max(base_height, int(round(112 * scale)))
         toolbar_padding = max(8, int(round(8 * scale)))
         target_height = base_height + toolbar_padding
         self.top_toolbar.setMinimumHeight(target_height)
-        self.top_toolbar.setMaximumHeight(max(target_height, int(round(146 * scale))))
+        self.top_toolbar.setMaximumHeight(max(target_height, int(round(208 * scale))))
         self.top_toolbar.updateGeometry()
 
     def resizeEvent(self, event):
@@ -4445,7 +4456,11 @@ class MaskDrawingWidget(QWidget):
 
         self._push_undo_snapshot(state)
         if hasattr(self.parent_editor, "remember_recent_brush_navigation_mask"):
-            self.parent_editor.remember_recent_brush_navigation_mask(self.parent_editor.mask_frames[current_frame])
+            current_frame_mask = self.parent_editor.mask_frames[current_frame]
+            delta_mask = None
+            if current_original is not None and current_frame_mask is not None:
+                delta_mask = np.where(current_frame_mask > current_original, current_frame_mask, 0).astype(current_frame_mask.dtype, copy=False)
+            self.parent_editor.remember_recent_brush_navigation_mask(current_frame_mask, delta=delta_mask)
         self.parent_editor.update_mask_frame_tracking()
         return True
 
