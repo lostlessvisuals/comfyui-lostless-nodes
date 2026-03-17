@@ -3,8 +3,6 @@ import { api } from "../../../scripts/api.js";
 
 const RANDOM_IMAGE_NODE = "LostlessRandomImage";
 const RANDOMIZE_BUTTON_NODE = "LostlessRandomizeButton";
-const LOOP_CUT_PLANNER_NODE = "LostlessLoopCutPlanner";
-const LOOP_CUTTER_NODE = "LostlessLoopCutter";
 const MASK_EDITOR_NODE = "MaskEditor";
 const RANDOM_PRIMARY_BUTTON_HEIGHT = 40;
 const RANDOM_PRIMARY_BUTTON_MIN_WIDTH = 220;
@@ -144,53 +142,6 @@ function hideWidget(widget) {
   widget.hidden = true;
 }
 
-function getConnectedInputNode(node, inputName) {
-  const graph = app.graph;
-  if (!graph) {
-    return null;
-  }
-  const input = (node.inputs || []).find((entry) => entry.name === inputName);
-  const linkId = input?.link;
-  if (!linkId) {
-    return null;
-  }
-  const link = graph.links?.[linkId];
-  if (!link) {
-    return null;
-  }
-  return graph.getNodeById?.(link.origin_id) || null;
-}
-
-function getConnectedVhsVideoPath(node) {
-  const upstream = getConnectedInputNode(node, "images");
-  if (!upstream || upstream.type !== "VHS_LoadVideo") {
-    return "";
-  }
-
-  const widgetsValues = upstream.widgets_values || {};
-  if (widgetsValues && typeof widgetsValues === "object" && !Array.isArray(widgetsValues)) {
-    const direct = widgetsValues.video || widgetsValues?.videopreview?.params?.filename;
-    if (typeof direct === "string" && direct.trim()) {
-      return direct.trim();
-    }
-  }
-
-  const widget = getWidget(upstream, "video");
-  if (typeof widget?.value === "string" && widget.value.trim()) {
-    return widget.value.trim();
-  }
-  return "";
-}
-
-function parseJsonSafe(value, fallback) {
-  try {
-    const parsed = JSON.parse(value || "");
-    return parsed ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 async function postJson(path, body) {
   const response = await api.fetchApi(path, {
     method: "POST",
@@ -286,38 +237,6 @@ async function openImagePicker(node) {
     path: data.path,
     filename: data.filename,
   };
-}
-
-async function fetchVideoMeta(path) {
-  const { data } = await postJson("/lostless/video-meta", { path });
-  return data;
-}
-
-async function fetchVideoFrameBlob(path, frameIndex, maxWidth = 960) {
-  const response = await api.fetchApi("/lostless/video-frame", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      path,
-      frame_index: frameIndex,
-      max_width: maxWidth,
-    }),
-  });
-
-  if (!response.ok) {
-    let message = "Failed to load video frame.";
-    try {
-      const data = await response.json();
-      message = data?.error || message;
-    } catch {
-      // no-op
-    }
-    throw new Error(message);
-  }
-
-  return await response.blob();
 }
 
 function applyPreview(node, blob) {
@@ -1396,42 +1315,6 @@ app.registerExtension({
         setTimeout(() => {
           fitNodeToWidgets(this, RANDOMIZE_BUTTON_NODE_MIN_WIDTH);
         }, 0);
-        return result;
-      };
-    }
-
-    if (nodeData.name === LOOP_CUT_PLANNER_NODE || nodeData.name === LOOP_CUTTER_NODE) {
-      const onNodeCreated = nodeType.prototype.onNodeCreated;
-      nodeType.prototype.onNodeCreated = function () {
-        const result = onNodeCreated?.apply(this, arguments);
-        if (this.__lostless_loop_planner_ready) {
-          return result;
-        }
-        this.__lostless_loop_planner_ready = true;
-
-        makeReadOnly(getWidget(this, "video_info_json"));
-        hideWidget(getWidget(this, "video_info_json"));
-        hideWidget(getWidget(this, "video_path"));
-        hideWidget(getWidget(this, "default_transition_frames"));
-        hideWidget(getWidget(this, "default_source_frames"));
-        hideWidget(getWidget(this, "default_overlap_frames"));
-        hideWidget(getWidget(this, "cuts_json"));
-        hideWidget(getWidget(this, "ui_refresh"));
-
-        this.addWidget(
-          "button",
-          nodeData.name === LOOP_CUTTER_NODE ? "Select Frames To Remove" : "Select Loop Cuts",
-          "",
-          async () => {
-            try {
-              await openLoopCutPlanner(this);
-            } catch (error) {
-              console.error("Lostless loop cut planner error:", error);
-            }
-          },
-          { serialize: false }
-        );
-
         return result;
       };
     }

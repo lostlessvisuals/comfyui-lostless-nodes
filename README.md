@@ -1,6 +1,6 @@
 ﻿# ComfyUI Lostless Nodes
 
-Lostless custom nodes for ComfyUI focused on random image selection, sequence buffering, loop planning, and mask editing.
+Lostless custom nodes for ComfyUI focused on random image selection, sequence buffering, and mask editing.
 
 ## Included Nodes
 
@@ -14,14 +14,6 @@ This package exposes these Lostless nodes:
   - Lets one button randomize every connected Lostless random-image node in the graph.
 - `Lostless Buffer`
   - Pads image sequences by duplicating the last frame to satisfy `LTX (8n+1)` or `WAN (4n+1)`.
-- `Lostless Loop Cut Planner`
-  - Opens an interactive planner for reviewing loop transitions and deciding which frames to cut.
-- `Lostless Loop Cut Task`
-  - Stores an individual cut instruction for later application.
-- `Lostless Loop Apply Cut Plan`
-  - Applies a saved cut plan to an image sequence.
-- `Lostless Loop Cutter`
-  - Combined loop-cut workflow node for planning and applying cuts from one surface.
 - `Lostless Mask Editor`
   - Interactive mask editor for batched image and mask sequences.
   - Supports reusable in-memory sessions, clear-memory control, and brush/shape carry while moving through frames.
@@ -34,7 +26,11 @@ This package exposes these Lostless nodes:
 
 - Random-image workflows now support manual image picking, preview restore, and connected-node randomization from the broadcast button node.
 - The mask editor now includes reusable session memory, memory clearing from the node UI, improved frame-to-frame mask carry while painting, and a more compact toolbar layout.
-- Loop-cut workflows include an in-canvas planner flow for reviewing video frames before applying a cut plan.
+
+## Validation Notes For Deferred Carry Changes
+
+- When editing deferred carry behavior in `Lostless-Mask-Editor/nodes/mask_editor.py`, run `docs/MASK_EDITOR_DEFERRED_CARRY_SMOKE.md` before closeout.
+- Keep repo-local durable lessons in `docs/LEARNINGS.md`.
 
 ## Embedded Boundary
 
@@ -42,7 +38,6 @@ This package exposes these Lostless nodes:
 - This package intentionally exposes only the focused Lostless surface:
   - random image selection
   - sequence buffering
-  - loop-cut planning and apply nodes
   - `Lostless Mask Editor`
   - `Lostless Image To Mask`
 
