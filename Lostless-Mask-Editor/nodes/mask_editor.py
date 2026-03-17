@@ -1646,7 +1646,7 @@ class InpaintingMaskEditor(QDialog):
         self.bake_card.setVisible(mode == "liquify")
         self._apply_responsive_chrome()
 
-        if mode != "brush":
+        if mode not in ["brush", "shape", "liquify"]:
             self.clear_recent_brush_navigation_mask()
         
         # Reset warp mode when switching modes
@@ -1991,6 +1991,7 @@ class InpaintingMaskEditor(QDialog):
                 self.mask_widget.bake_liquify_deformation()
 
         if propagate_brush_mask:
+            self._seed_navigation_delta_from_visible_mask()
             self._propagate_active_brush_mask([index])
         
         self.current_frame_index = index
@@ -2061,7 +2062,7 @@ class InpaintingMaskEditor(QDialog):
         self._recent_brush_navigation_source_frame = None
 
     def remember_recent_brush_navigation_mask(self, mask=None, delta=None):
-        if self.drawing_mode != "brush":
+        if self.drawing_mode not in ["brush", "shape", "liquify"]:
             self.clear_recent_brush_navigation_mask()
             return False
 
@@ -2088,10 +2089,30 @@ class InpaintingMaskEditor(QDialog):
         self._recent_brush_navigation_source_frame = int(self.current_frame_index)
         return True
 
+    def _seed_navigation_delta_from_visible_mask(self):
+        if self._recent_brush_navigation_delta is not None:
+            return True
+        if self.drawing_mode not in ["brush", "shape", "liquify"]:
+            return False
+        if not hasattr(self, "mask_widget") or self.mask_widget.mask is None:
+            return False
+        if not (0 <= self.current_frame_index < len(self.mask_frames)):
+            return False
+
+        stored_mask = self.mask_frames[self.current_frame_index]
+        visible_mask = self.mask_widget.mask
+        if stored_mask is None or visible_mask is None:
+            return False
+
+        delta_mask = np.where(visible_mask > stored_mask, visible_mask, 0).astype(visible_mask.dtype, copy=False)
+        if delta_mask.size == 0 or not np.any(delta_mask > 0):
+            return False
+
+        return self.remember_recent_brush_navigation_mask(visible_mask, delta=delta_mask)
+
     def _should_propagate_active_brush_mask(self):
         return (
-            self.drawing_mode == "brush" and
-            getattr(self.mask_widget, "current_tool", None) == "brush" and
+            self.drawing_mode in ["brush", "shape", "liquify"] and
             self._recent_brush_navigation_delta is not None
         )
 
@@ -2118,8 +2139,16 @@ class InpaintingMaskEditor(QDialog):
             affected_frames=[current_frame] + valid_frames,
         )
 
-        current_mask = self._recent_brush_navigation_delta.copy()
         changed = False
+        current_visible_mask = None
+        if hasattr(self, "mask_widget") and self.mask_widget.mask is not None:
+            current_visible_mask = self.mask_widget.mask.copy()
+            self.mask_frames[current_frame] = current_visible_mask.copy()
+            original_current_mask = state["mask_frames"].get(current_frame)
+            if original_current_mask is None or not np.array_equal(current_visible_mask, original_current_mask):
+                changed = True
+
+        current_mask = self._recent_brush_navigation_delta.copy()
         for frame_i in valid_frames:
             existing_mask = self.mask_frames[frame_i]
             if existing_mask is None:
@@ -2138,6 +2167,14 @@ class InpaintingMaskEditor(QDialog):
         if state["mask"] is not None:
             state["mask"] = state["mask"].copy()
         self.mask_widget._push_undo_snapshot(state)
+
+        if self.drawing_mode in ["shape", "liquify"] and hasattr(self.mask_widget, "shape_keyframes"):
+            if hasattr(self.mask_widget, "_temp_interpolated_shapes"):
+                self.mask_widget._temp_interpolated_shapes.pop(current_frame, None)
+            self.bootstrap_shape_keyframes_from_masks(frame_indices=[current_frame] + valid_frames)
+            if hasattr(self.mask_widget, "invalidate_shape_cache"):
+                self.mask_widget.invalidate_shape_cache()
+
         self.update_mask_frame_tracking()
         return True
     
