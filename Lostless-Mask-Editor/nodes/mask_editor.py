@@ -2148,6 +2148,11 @@ class InpaintingMaskEditor(QDialog):
 
     def _seed_navigation_delta_from_visible_mask(self):
         if self._recent_brush_navigation_delta is not None:
+            if self.drawing_mode == "brush":
+                transaction = getattr(self.mask_widget, "_pixel_brush_transaction", None)
+                if not getattr(self.mask_widget, "is_drawing", False) or transaction is None:
+                    self.clear_recent_brush_navigation_mask()
+                    return False
             return True
         if self.drawing_mode not in ["brush", "shape", "liquify"]:
             return False
@@ -4749,6 +4754,8 @@ class MaskDrawingWidget(QWidget):
                     else:
                         # Regular brush mode
                         self.is_drawing = True
+                        if self.parent_editor:
+                            self.parent_editor.clear_recent_brush_navigation_mask()
                         self.begin_pixel_brush_transaction("Brush stroke")
                         self.last_point = event.pos()
                         self.current_stroke_points = []  # Start new stroke
@@ -4969,6 +4976,8 @@ class MaskDrawingWidget(QWidget):
 
                 if self.drawing_mode == "brush" and not action_performed:
                     self.commit_pixel_brush_transaction()
+                if self.parent_editor and not getattr(self.parent_editor, "_recent_brush_navigation_pending_frames", None):
+                    self.parent_editor.clear_recent_brush_navigation_mask()
             elif self.selected_vertex_index is not None:
                 # Save state after warping vertex
                 self.save_undo_state("Warp vertex")
