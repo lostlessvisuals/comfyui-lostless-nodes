@@ -598,7 +598,7 @@ class InpaintingMaskEditor(QDialog):
         compact_button_min_width = max(44, int(round(46 * self._ui_scale)))
         compact_spin_width = max(54, int(round(62 * self._ui_scale)))
         action_button_height = max(24, int(round(26 * self._ui_scale)))
-        action_card_min_width = max(150, int(round(172 * self._ui_scale)))
+        action_card_min_width = max(124, int(round(136 * self._ui_scale)))
         action_card_spacing = max(4, int(round(6 * self._ui_scale)))
         value_chip_min_width = max(32, int(round(36 * self._ui_scale)))
         self._action_card_spacing = action_card_spacing
@@ -623,7 +623,7 @@ class InpaintingMaskEditor(QDialog):
 
         toolbar_primary_row = QHBoxLayout()
         toolbar_primary_row.setContentsMargins(0, 0, 0, 0)
-        toolbar_primary_row.setSpacing(action_card_spacing)
+        toolbar_primary_row.setSpacing(max(8, int(round(10 * self._ui_scale))))
         toolbar_controls_layout.addLayout(toolbar_primary_row)
         toolbar_controls_layout.addStretch()
 
@@ -633,22 +633,15 @@ class InpaintingMaskEditor(QDialog):
         toolbar_actions_layout.setSpacing(0)
 
         toolbar_actions_grid_host = QWidget()
+        toolbar_actions_grid_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         toolbar_actions_grid = QGridLayout(toolbar_actions_grid_host)
         toolbar_actions_grid.setContentsMargins(0, 0, 0, 0)
         toolbar_actions_grid.setHorizontalSpacing(action_card_spacing)
         toolbar_actions_grid.setVerticalSpacing(action_card_spacing)
-        toolbar_actions_scroll = QScrollArea()
-        toolbar_actions_scroll.setWidgetResizable(True)
-        toolbar_actions_scroll.setFrameShape(QFrame.NoFrame)
-        toolbar_actions_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        toolbar_actions_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        toolbar_actions_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        toolbar_actions_scroll.setWidget(toolbar_actions_grid_host)
-        toolbar_actions_layout.addWidget(toolbar_actions_scroll)
+        toolbar_actions_layout.addWidget(toolbar_actions_grid_host)
 
         toolbar_controls_panel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         toolbar_actions_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        toolbar_actions_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         top_toolbar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
         toolbar_shell_layout.addWidget(toolbar_controls_panel, 0)
@@ -660,9 +653,28 @@ class InpaintingMaskEditor(QDialog):
         self.toolbar_actions_panel = toolbar_actions_panel
         self.toolbar_actions_grid = toolbar_actions_grid
         self.toolbar_actions_grid_host = toolbar_actions_grid_host
-        self.toolbar_actions_scroll = toolbar_actions_scroll
+        self.toolbar_actions_scroll = None
 
-        toolbar_layout = toolbar_primary_row
+        slider_controls_panel = QWidget()
+        slider_controls_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        slider_controls_layout = QVBoxLayout(slider_controls_panel)
+        slider_controls_layout.setContentsMargins(0, 0, 0, 0)
+        slider_controls_layout.setSpacing(max(3, int(round(4 * self._ui_scale))))
+
+        brush_controls_row = QHBoxLayout()
+        brush_controls_row.setContentsMargins(0, 0, 0, 0)
+        brush_controls_row.setSpacing(max(5, int(round(6 * self._ui_scale))))
+        slider_controls_layout.addLayout(brush_controls_row)
+
+        vertex_controls_row = QHBoxLayout()
+        vertex_controls_row.setContentsMargins(0, 0, 0, 0)
+        vertex_controls_row.setSpacing(max(5, int(round(6 * self._ui_scale))))
+        slider_controls_layout.addLayout(vertex_controls_row)
+
+        toolbar_primary_row.addWidget(slider_controls_panel, 0, Qt.AlignTop)
+
+        toolbar_layout = brush_controls_row
+        vertex_toolbar_layout = vertex_controls_row
 
         # Create tool button style (dark theme)
         tool_button_style = f"""
@@ -910,8 +922,8 @@ class InpaintingMaskEditor(QDialog):
         saved_brush_size = self.brush_sizes['pixel']
         self.brush_size_slider.setValue(saved_brush_size)
         self.brush_size = saved_brush_size
-        self.brush_size_slider.setMinimumWidth(85)
-        self.brush_size_slider.setMaximumWidth(130)
+        self.brush_size_slider.setMinimumWidth(max(130, int(round(148 * self._ui_scale))))
+        self.brush_size_slider.setMaximumWidth(max(170, int(round(200 * self._ui_scale))))
         self.brush_size_slider.valueChanged.connect(self.on_brush_size_changed)
         self.brush_size_slider.setToolTip("Brush size (Alt+Right-click drag)")
         toolbar_layout.addWidget(self.brush_size_slider)
@@ -930,35 +942,37 @@ class InpaintingMaskEditor(QDialog):
         self.vertex_count_label_text = QLabel("Vertices:")
         self.vertex_count_label_text.setStyleSheet(control_label_style)
         self.vertex_count_label_text.setVisible(False)  # Hidden by default
-        toolbar_layout.addWidget(self.vertex_count_label_text)
-        
+        vertex_toolbar_layout.addWidget(self.vertex_count_label_text)
+
         self.vertex_count_slider = QSlider(Qt.Horizontal)
         self.vertex_count_slider.setRange(8, 512)  # 8 to 512 vertices
         # Load saved vertex count or use default
         initial_vertex_count = self.settings.value('mask_editor_vertex_count', 150, type=int)
         self.vertex_count_slider.setValue(initial_vertex_count)
-        self.vertex_count_slider.setMinimumWidth(100)
-        self.vertex_count_slider.setMaximumWidth(150)
+        self.vertex_count_slider.setMinimumWidth(max(130, int(round(148 * self._ui_scale))))
+        self.vertex_count_slider.setMaximumWidth(max(170, int(round(200 * self._ui_scale))))
         self.vertex_count_slider.valueChanged.connect(self.on_vertex_count_changed)
         self.vertex_count_slider.sliderPressed.connect(self.on_vertex_slider_pressed)
         self.vertex_count_slider.sliderReleased.connect(self.on_vertex_slider_released)
         self.vertex_count_slider.setVisible(False)  # Hidden by default
         self.vertex_count_slider.setToolTip("Number of vertices for shape complexity")
-        toolbar_layout.addWidget(self.vertex_count_slider)
-        
+        vertex_toolbar_layout.addWidget(self.vertex_count_slider)
+
         self.vertex_count_label = QLabel(str(initial_vertex_count))
         self.vertex_count_label.setMinimumWidth(value_chip_min_width)
         self.vertex_count_label.setAlignment(Qt.AlignCenter)
         self.vertex_count_label.setStyleSheet(value_chip_style)
         self.vertex_count_label.setVisible(False)  # Hidden by default
-        toolbar_layout.addWidget(self.vertex_count_label)
+        vertex_toolbar_layout.addWidget(self.vertex_count_label)
         
         # Separator for vertex controls
         self.vertex_sep = QFrame()
         self.vertex_sep.setFrameShape(QFrame.VLine)
         self.vertex_sep.setFrameShadow(QFrame.Sunken)
         self.vertex_sep.setVisible(False)  # Hidden by default
-        toolbar_layout.addWidget(self.vertex_sep)
+        vertex_toolbar_layout.addStretch()
+
+        toolbar_layout = toolbar_primary_row
         
         # Fill holes checkbox (more compact)
         self.fill_holes_check = QCheckBox("Fill holes")
@@ -1004,11 +1018,11 @@ class InpaintingMaskEditor(QDialog):
         toolbar_layout.addWidget(self.lattice_size_label)
 
         toolbar_primary_row.addStretch()
-        
+
         card_title_style = f"""
             QLabel {{
-                color: #f1f4f7;
-                font-size: {compact_font_px}px;
+                color: #d7dee5;
+                font-size: {max(10, compact_font_px - 1)}px;
                 font-weight: 700;
                 padding: 0;
             }}
@@ -1022,13 +1036,9 @@ class InpaintingMaskEditor(QDialog):
             }}
         """
         action_card_style = f"""
-            QFrame#MaskActionCard {{
-                background-color: #1c2127;
-                border: 1px solid #2d353d;
-                border-radius: 8px;
-            }}
-            QFrame#MaskActionCard[active="true"] {{
-                border-color: #38424c;
+            QWidget#MaskActionCard {{
+                background: transparent;
+                border: none;
             }}
         """
 
@@ -1108,35 +1118,29 @@ class InpaintingMaskEditor(QDialog):
             }}
         """
         def create_action_card(title, object_name):
-            card = QFrame()
+            card = QWidget()
             card.setObjectName("MaskActionCard")
-            card.setProperty("active", "true")
             card.setStyleSheet(action_card_style)
             card.setMinimumWidth(action_card_min_width)
             card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(8, 7, 8, 7)
-            card_layout.setSpacing(max(4, int(round(5 * self._ui_scale))))
+            card_layout.setContentsMargins(2, 1, 2, 1)
+            card_layout.setSpacing(max(2, int(round(3 * self._ui_scale))))
 
             title_label = QLabel(title)
             title_label.setObjectName(f"{object_name}_title")
             title_label.setStyleSheet(card_title_style)
-            title_label.setAlignment(Qt.AlignCenter)
+            title_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             title_label.setWordWrap(False)
             card_layout.addWidget(title_label)
 
-            action_row = QHBoxLayout()
-            action_row.setContentsMargins(0, 0, 0, 0)
-            action_row.setSpacing(max(5, int(round(6 * self._ui_scale))))
-            card_layout.addLayout(action_row)
+            controls_row = QHBoxLayout()
+            controls_row.setContentsMargins(0, 0, 0, 0)
+            controls_row.setSpacing(max(5, int(round(6 * self._ui_scale))))
+            card_layout.addLayout(controls_row)
 
-            meta_row = QHBoxLayout()
-            meta_row.setContentsMargins(0, 0, 0, 0)
-            meta_row.setSpacing(max(5, int(round(6 * self._ui_scale))))
-            card_layout.addLayout(meta_row)
-
-            return card, card_layout, title_label, action_row, meta_row
+            return card, card_layout, title_label, controls_row, controls_row
 
         def style_action_button(button, style_sheet):
             button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -2184,11 +2188,6 @@ class InpaintingMaskEditor(QDialog):
         return changed
 
     def _seed_navigation_delta_from_visible_mask(self):
-        if self._recent_brush_navigation_delta is not None:
-            if self.drawing_mode in ["brush", "shape"] and not self._has_live_navigation_delta_source():
-                self.clear_recent_brush_navigation_mask()
-                return False
-            return True
         if self.drawing_mode not in ["brush", "shape", "liquify"]:
             return False
         if not hasattr(self, "mask_widget") or self.mask_widget.mask is None:
@@ -2196,22 +2195,38 @@ class InpaintingMaskEditor(QDialog):
         if not (0 <= self.current_frame_index < len(self.mask_frames)):
             return False
 
-        if self.drawing_mode == "shape" and self._has_live_navigation_delta_source():
-            temp_shape_mask = getattr(self.mask_widget, "temp_shape_mask", None)
-            visible_mask = self.mask_widget.mask
-            if temp_shape_mask is None or visible_mask is None:
+        live_delta_source = self._has_live_navigation_delta_source()
+        if self.drawing_mode in ["brush", "shape"]:
+            if not live_delta_source:
+                self.clear_recent_brush_navigation_mask()
                 return False
-            combined_mask = np.maximum(visible_mask, temp_shape_mask)
-            return self.remember_recent_brush_navigation_mask(combined_mask, delta=temp_shape_mask)
 
-        stored_mask = None
-        if self.drawing_mode == "brush" and self._has_live_navigation_delta_source():
+            visible_mask = self.mask_widget.mask
+            if self.drawing_mode == "shape":
+                temp_shape_mask = getattr(self.mask_widget, "temp_shape_mask", None)
+                if temp_shape_mask is None or visible_mask is None:
+                    return False
+                combined_mask = np.maximum(visible_mask, temp_shape_mask)
+                return self.remember_recent_brush_navigation_mask(combined_mask, delta=temp_shape_mask)
+
+            stored_mask = None
             transaction = getattr(self.mask_widget, "_pixel_brush_transaction", None)
             if transaction is not None:
                 stored_mask = transaction.get("mask_frames", {}).get(int(self.current_frame_index))
+            if stored_mask is None or visible_mask is None:
+                return False
 
-        if stored_mask is None:
-            stored_mask = self.mask_frames[self.current_frame_index]
+            delta_mask = np.where(visible_mask > stored_mask, visible_mask, 0).astype(visible_mask.dtype, copy=False)
+            if delta_mask.size == 0 or not np.any(delta_mask > 0):
+                return False
+
+            return self.remember_recent_brush_navigation_mask(visible_mask, delta=delta_mask)
+
+        if self._recent_brush_navigation_delta is not None:
+            return True
+
+        stored_mask = None
+        stored_mask = self.mask_frames[self.current_frame_index]
         visible_mask = self.mask_widget.mask
         if stored_mask is None or visible_mask is None:
             return False
@@ -3764,30 +3779,26 @@ class InpaintingMaskEditor(QDialog):
             return
 
         width = max(1, self.width())
-        height = max(1, self.height())
-        scale = getattr(self, "_ui_scale", 1.0)
-        compact_toolbar = width < 1240 or height < 860
-
         self.toolbar_shell_layout.setDirection(QBoxLayout.LeftToRight)
         self.toolbar_shell_layout.setStretch(0, 0)
         self.toolbar_shell_layout.setStretch(1, 1)
 
-        self.toolbar_controls_panel.setMaximumWidth(max(340, int(width * 0.28)))
+        self.toolbar_controls_panel.setMaximumWidth(max(280, int(width * 0.24)))
         self.toolbar_actions_panel.setMaximumWidth(16777215)
 
         actions_width = max(
             1,
-            self.toolbar_actions_scroll.viewport().width()
-            if hasattr(self, "toolbar_actions_scroll") and self.toolbar_actions_scroll.viewport().width() > 0
-            else self.toolbar_actions_panel.width()
+            self.toolbar_actions_panel.width()
             if self.toolbar_actions_panel.width() > 0
             else width - self.toolbar_controls_panel.maximumWidth()
         )
-        if actions_width >= 1120:
+        if actions_width >= 1220:
+            columns = 5
+        elif actions_width >= 980:
             columns = 4
-        elif actions_width >= 820:
+        elif actions_width >= 760:
             columns = 3
-        elif actions_width >= 520:
+        elif actions_width >= 500:
             columns = 2
         else:
             columns = 1
@@ -3804,29 +3815,12 @@ class InpaintingMaskEditor(QDialog):
                 card.setMaximumWidth(column_width)
             else:
                 card.setMaximumWidth(16777215)
-        rows = max(1, (len(visible_cards) + columns - 1) // columns)
         controls_height = self.toolbar_controls_panel.sizeHint().height()
         actions_height = self.toolbar_actions_grid_host.sizeHint().height()
-        toolbar_padding = max(8, int(round(8 * scale)))
-        toolbar_height_budget = max(
-            136,
-            min(
-                int(height * (0.38 if compact_toolbar else 0.34)),
-                int(round((320 if compact_toolbar else 360) * max(scale, 0.92))),
-            ),
-        )
-        if hasattr(self, "toolbar_actions_scroll"):
-            max_actions_height = max(96, toolbar_height_budget - toolbar_padding)
-            min_actions_height = min(actions_height, max(84, int(height * 0.13)))
-            self.toolbar_actions_scroll.setMinimumHeight(min_actions_height)
-            self.toolbar_actions_scroll.setMaximumHeight(max_actions_height)
-        visible_actions_height = min(actions_height, getattr(self.toolbar_actions_scroll, "maximumHeight", lambda: actions_height)())
-        base_height = max(controls_height, visible_actions_height)
-        if compact_toolbar and rows > 1:
-            base_height = max(base_height, getattr(self.toolbar_actions_scroll, "minimumHeight", lambda: 0)())
-        target_height = min(base_height + toolbar_padding, toolbar_height_budget)
+        toolbar_padding = max(8, int(round(8 * getattr(self, "_ui_scale", 1.0))))
+        target_height = max(controls_height, actions_height) + toolbar_padding
         self.top_toolbar.setMinimumHeight(target_height)
-        self.top_toolbar.setMaximumHeight(toolbar_height_budget)
+        self.top_toolbar.setMaximumHeight(target_height)
         self.top_toolbar.updateGeometry()
 
     def resizeEvent(self, event):
