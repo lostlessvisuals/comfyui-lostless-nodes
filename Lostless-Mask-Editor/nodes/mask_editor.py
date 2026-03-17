@@ -557,6 +557,8 @@ class InpaintingMaskEditor(QDialog):
         self._keyframe_navigation = False  # Flag to track if navigation is via Alt+Arrow
         self.enable_smooth_interpolation = True
         self.enable_smooth_shapes = True
+        self._recent_brush_navigation_mask = None
+        self._recent_brush_navigation_source_frame = None
         
         self.init_ui()
         
@@ -570,10 +572,10 @@ class InpaintingMaskEditor(QDialog):
         screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
         available = screen.availableGeometry() if screen is not None else QRect(0, 0, 1600, 900)
         base_scale = min(available.width() / 1720.0, available.height() / 1080.0)
-        self._ui_scale = max(0.9, min(1.25, base_scale))
+        self._ui_scale = max(0.72, min(1.0, base_scale))
 
-        min_window_width = min(max(900, int(1040 * self._ui_scale)), available.width())
-        min_window_height = min(max(640, int(760 * self._ui_scale)), available.height())
+        min_window_width = min(max(860, int(980 * self._ui_scale)), available.width())
+        min_window_height = min(max(580, int(700 * self._ui_scale)), available.height())
         initial_width = min(available.width(), max(min_window_width, int(available.width() * 0.94)))
         initial_height = min(available.height(), max(min_window_height, int(available.height() * 0.92)))
         x = available.x() + max(0, (available.width() - initial_width) // 2)
@@ -584,17 +586,17 @@ class InpaintingMaskEditor(QDialog):
         self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint | Qt.WindowSystemMenuHint)
         self.setSizeGripEnabled(True)
 
-        tool_button_px = max(32, int(round(34 * self._ui_scale)))
-        compact_font_px = max(11, int(round(12 * self._ui_scale)))
-        mode_font_px = max(11, int(round(12 * self._ui_scale)))
-        button_padding_v = max(3, int(round(3 * self._ui_scale)))
-        button_padding_h = max(8, int(round(8 * self._ui_scale)))
-        wide_button_min_width = max(56, int(round(58 * self._ui_scale)))
-        compact_button_min_width = max(48, int(round(50 * self._ui_scale)))
-        compact_spin_width = max(56, int(round(66 * self._ui_scale)))
-        action_button_height = max(28, int(round(30 * self._ui_scale)))
-        action_card_min_width = max(184, int(round(212 * self._ui_scale)))
-        action_card_spacing = max(6, int(round(8 * self._ui_scale)))
+        tool_button_px = max(30, int(round(32 * self._ui_scale)))
+        compact_font_px = max(10, int(round(11 * self._ui_scale)))
+        mode_font_px = max(10, int(round(11 * self._ui_scale)))
+        button_padding_v = max(2, int(round(2 * self._ui_scale)))
+        button_padding_h = max(6, int(round(7 * self._ui_scale)))
+        wide_button_min_width = max(48, int(round(52 * self._ui_scale)))
+        compact_button_min_width = max(44, int(round(46 * self._ui_scale)))
+        compact_spin_width = max(54, int(round(62 * self._ui_scale)))
+        action_button_height = max(24, int(round(26 * self._ui_scale)))
+        action_card_min_width = max(150, int(round(172 * self._ui_scale)))
+        action_card_spacing = max(4, int(round(6 * self._ui_scale)))
         value_chip_min_width = max(32, int(round(36 * self._ui_scale)))
 
         # Enable keyboard shortcuts
@@ -624,17 +626,25 @@ class InpaintingMaskEditor(QDialog):
         toolbar_actions_panel = QWidget()
         toolbar_actions_layout = QVBoxLayout(toolbar_actions_panel)
         toolbar_actions_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_actions_layout.setSpacing(action_card_spacing)
+        toolbar_actions_layout.setSpacing(0)
 
         toolbar_actions_grid_host = QWidget()
         toolbar_actions_grid = QGridLayout(toolbar_actions_grid_host)
         toolbar_actions_grid.setContentsMargins(0, 0, 0, 0)
         toolbar_actions_grid.setHorizontalSpacing(action_card_spacing)
         toolbar_actions_grid.setVerticalSpacing(action_card_spacing)
-        toolbar_actions_layout.addWidget(toolbar_actions_grid_host)
+        toolbar_actions_scroll = QScrollArea()
+        toolbar_actions_scroll.setWidgetResizable(True)
+        toolbar_actions_scroll.setFrameShape(QFrame.NoFrame)
+        toolbar_actions_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        toolbar_actions_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        toolbar_actions_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        toolbar_actions_scroll.setWidget(toolbar_actions_grid_host)
+        toolbar_actions_layout.addWidget(toolbar_actions_scroll)
 
         toolbar_controls_panel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
-        toolbar_actions_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        toolbar_actions_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        top_toolbar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
         toolbar_shell_layout.addWidget(toolbar_controls_panel, 0)
         toolbar_shell_layout.addWidget(toolbar_actions_panel, 1, Qt.AlignTop)
@@ -645,6 +655,7 @@ class InpaintingMaskEditor(QDialog):
         self.toolbar_actions_panel = toolbar_actions_panel
         self.toolbar_actions_grid = toolbar_actions_grid
         self.toolbar_actions_grid_host = toolbar_actions_grid_host
+        self.toolbar_actions_scroll = toolbar_actions_scroll
 
         toolbar_layout = toolbar_primary_row
 
@@ -1007,12 +1018,12 @@ class InpaintingMaskEditor(QDialog):
         """
         action_card_style = f"""
             QFrame#MaskActionCard {{
-                background-color: #20252b;
-                border: 1px solid #3a424b;
-                border-radius: 10px;
+                background-color: #1c2127;
+                border: 1px solid #2d353d;
+                border-radius: 8px;
             }}
             QFrame#MaskActionCard[active="true"] {{
-                border-color: #4c5967;
+                border-color: #38424c;
             }}
         """
 
@@ -1022,8 +1033,8 @@ class InpaintingMaskEditor(QDialog):
                 color: #ffffff;
                 font-weight: 600;
                 font-size: {compact_font_px}px;
-                border: 1px solid #777;
-                border-radius: 7px;
+                border: none;
+                border-radius: 6px;
                 padding: {button_padding_v}px {button_padding_h}px;
                 min-height: {action_button_height}px;
             }}
@@ -1037,8 +1048,8 @@ class InpaintingMaskEditor(QDialog):
                 color: #ffffff;
                 font-weight: 600;
                 font-size: {compact_font_px}px;
-                border: 1px solid #6f859a;
-                border-radius: 7px;
+                border: none;
+                border-radius: 6px;
                 padding: {button_padding_v}px {button_padding_h}px;
                 min-height: {action_button_height}px;
             }}
@@ -1052,8 +1063,8 @@ class InpaintingMaskEditor(QDialog):
                 color: #ffffff;
                 font-weight: 600;
                 font-size: {compact_font_px}px;
-                border: 1px solid #8c6666;
-                border-radius: 7px;
+                border: none;
+                border-radius: 6px;
                 padding: {button_padding_v}px {button_padding_h}px;
                 min-height: {action_button_height}px;
             }}
@@ -1067,8 +1078,8 @@ class InpaintingMaskEditor(QDialog):
                 color: #ffffff;
                 font-weight: 600;
                 font-size: {compact_font_px}px;
-                border: 1px solid #91895e;
-                border-radius: 7px;
+                border: none;
+                border-radius: 6px;
                 padding: {button_padding_v}px {button_padding_h}px;
                 min-height: {action_button_height}px;
             }}
@@ -1082,8 +1093,8 @@ class InpaintingMaskEditor(QDialog):
                 color: #ffffff;
                 font-weight: 600;
                 font-size: {compact_font_px}px;
-                border: 1px solid #6f8b77;
-                border-radius: 7px;
+                border: none;
+                border-radius: 6px;
                 padding: {button_padding_v}px {button_padding_h}px;
                 min-height: {action_button_height}px;
             }}
@@ -1100,12 +1111,13 @@ class InpaintingMaskEditor(QDialog):
             card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(10, 9, 10, 9)
-            card_layout.setSpacing(max(5, int(round(6 * self._ui_scale))))
+            card_layout.setContentsMargins(8, 7, 8, 7)
+            card_layout.setSpacing(max(4, int(round(5 * self._ui_scale))))
 
             title_label = QLabel(title)
             title_label.setObjectName(f"{object_name}_title")
             title_label.setStyleSheet(card_title_style)
+            title_label.setWordWrap(False)
             card_layout.addWidget(title_label)
 
             action_row = QHBoxLayout()
@@ -1462,6 +1474,7 @@ class InpaintingMaskEditor(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        QTimer.singleShot(0, self._apply_responsive_chrome)
         if not hasattr(self, '_startup_vertex_sync_done'):
             self._startup_vertex_sync_done = True
             # Sync the startup target to the current slider value once.
@@ -1630,6 +1643,9 @@ class InpaintingMaskEditor(QDialog):
         self.cleanup_card.setVisible(is_shape_mode)
         self.bake_card.setVisible(mode == "liquify")
         self._apply_responsive_chrome()
+
+        if mode != "brush":
+            self.clear_recent_brush_navigation_mask()
         
         # Reset warp mode when switching modes
         if mode != "shape":
@@ -1930,9 +1946,9 @@ class InpaintingMaskEditor(QDialog):
     def on_timeline_frame_changed(self, index):
         """Handle frame change from timeline widget clicks - mark as manual navigation"""
         self._manual_navigation = True
-        self.on_frame_changed(index)
+        self.on_frame_changed(index, propagate_brush_mask=False)
     
-    def on_frame_changed(self, index):
+    def on_frame_changed(self, index, propagate_brush_mask=False):
         if index == self.current_frame_index:
             return
 
@@ -1972,7 +1988,8 @@ class InpaintingMaskEditor(QDialog):
                 # Bake the current liquify deformations into the keyframe
                 self.mask_widget.bake_liquify_deformation()
 
-        self._propagate_active_brush_mask([index])
+        if propagate_brush_mask:
+            self._propagate_active_brush_mask([index])
         
         self.current_frame_index = index
         # Frame change - shapes will be recalculated
@@ -2036,13 +2053,36 @@ class InpaintingMaskEditor(QDialog):
         # Update Apply to Current button state
         self.update_apply_button_state()
 
+    def clear_recent_brush_navigation_mask(self):
+        self._recent_brush_navigation_mask = None
+        self._recent_brush_navigation_source_frame = None
+
+    def remember_recent_brush_navigation_mask(self, mask=None):
+        if self.drawing_mode != "brush":
+            self.clear_recent_brush_navigation_mask()
+            return False
+
+        source_mask = mask
+        if source_mask is None and 0 <= self.current_frame_index < len(self.mask_frames):
+            source_mask = self.mask_frames[self.current_frame_index]
+        if source_mask is None:
+            self.clear_recent_brush_navigation_mask()
+            return False
+
+        source_mask = source_mask.copy()
+        if source_mask.size == 0 or not np.any(source_mask > 0):
+            self.clear_recent_brush_navigation_mask()
+            return False
+
+        self._recent_brush_navigation_mask = source_mask
+        self._recent_brush_navigation_source_frame = int(self.current_frame_index)
+        return True
+
     def _should_propagate_active_brush_mask(self):
         return (
-            hasattr(self, "mask_widget") and
-            getattr(self.mask_widget, "is_drawing", False) and
-            getattr(self.mask_widget, "current_tool", None) == "brush" and
             self.drawing_mode == "brush" and
-            self.mask_widget.mask is not None
+            getattr(self.mask_widget, "current_tool", None) == "brush" and
+            self._recent_brush_navigation_mask is not None
         )
 
     def _propagate_active_brush_mask(self, frame_indices):
@@ -2062,19 +2102,32 @@ class InpaintingMaskEditor(QDialog):
             return False
 
         current_frame = int(self.current_frame_index)
-        self.mask_widget.begin_pixel_brush_transaction("Brush stroke")
-        self.mask_widget.capture_pixel_brush_frames([current_frame] + valid_frames)
+        state = self.mask_widget._capture_state(
+            description="Propagate brush mask",
+            full_snapshot=False,
+            affected_frames=[current_frame] + valid_frames,
+        )
 
-        current_mask = self.mask_widget.mask.copy()
-        self.mask_frames[current_frame] = current_mask.copy()
+        current_mask = self._recent_brush_navigation_mask.copy()
+        changed = False
         for frame_i in valid_frames:
             existing_mask = self.mask_frames[frame_i]
             if existing_mask is None:
                 merged_mask = current_mask.copy()
             else:
                 merged_mask = np.maximum(existing_mask, current_mask)
+            if not np.array_equal(merged_mask, existing_mask):
+                changed = True
             self.mask_frames[frame_i] = merged_mask
 
+        if not changed:
+            return False
+
+        state["frame"] = current_frame
+        state["mask"] = state["mask_frames"].get(current_frame)
+        if state["mask"] is not None:
+            state["mask"] = state["mask"].copy()
+        self.mask_widget._push_undo_snapshot(state)
         self.update_mask_frame_tracking()
         return True
     
@@ -2108,6 +2161,7 @@ class InpaintingMaskEditor(QDialog):
         """Clear the mask for current frame"""
         # Save undo state before clearing
         self.mask_widget.save_undo_state("Clear frame", affected_frames=[self.current_frame_index])
+        self.clear_recent_brush_navigation_mask()
         
         if self.drawing_mode in ["shape", "liquify"]:
             # In shape mode, remove the keyframe entirely so interpolation takes over
@@ -2172,6 +2226,7 @@ class InpaintingMaskEditor(QDialog):
         else:
             # In pixel mode, fill the pixel data
             self.mask_frames[self.current_frame_index] = np.ones_like(self.mask_frames[self.current_frame_index]) * 255
+            self.remember_recent_brush_navigation_mask(self.mask_frames[self.current_frame_index])
         self.update_display()
         # Restore focus to mask widget for keyboard shortcuts
         self.mask_widget.setFocus()
@@ -2512,6 +2567,7 @@ class InpaintingMaskEditor(QDialog):
         
         # Save undo state before clearing
         self.mask_widget.save_undo_state("Clear all frames", full_snapshot=True)
+        self.clear_recent_brush_navigation_mask()
 
         # Clear every raster frame regardless of current mode.
         for i in range(len(self.mask_frames)):
@@ -3487,34 +3543,37 @@ class InpaintingMaskEditor(QDialog):
         width = max(1, self.width())
         height = max(1, self.height())
         scale = getattr(self, "_ui_scale", 1.0)
-        compact_toolbar = width < 1520 or (width < 1720 and height < 920)
+        compact_toolbar = width < 1240 or height < 860
 
-        if compact_toolbar:
-            self.toolbar_shell_layout.setDirection(QBoxLayout.TopToBottom)
-            self.toolbar_shell_layout.setStretch(0, 0)
-            self.toolbar_shell_layout.setStretch(1, 0)
-        else:
-            self.toolbar_shell_layout.setDirection(QBoxLayout.LeftToRight)
-            self.toolbar_shell_layout.setStretch(0, 0)
-            self.toolbar_shell_layout.setStretch(1, 1)
+        self.toolbar_shell_layout.setDirection(QBoxLayout.LeftToRight)
+        self.toolbar_shell_layout.setStretch(0, 0)
+        self.toolbar_shell_layout.setStretch(1, 1)
 
-        self.toolbar_controls_panel.setMaximumWidth(max(560, int(width * 0.46)))
+        self.toolbar_controls_panel.setMaximumWidth(max(420, int(width * 0.34)))
         self.toolbar_actions_panel.setMaximumWidth(16777215)
+        if hasattr(self, "toolbar_actions_scroll"):
+            max_actions_height = max(64, min(int(height * 0.18), int(round(132 * scale))))
+            self.toolbar_actions_scroll.setMinimumHeight(0)
+            self.toolbar_actions_scroll.setMaximumHeight(max_actions_height)
+
         actions_width = max(
             1,
-            self.toolbar_actions_panel.width() if self.toolbar_actions_panel.width() > 0 else width - self.toolbar_controls_panel.maximumWidth()
+            self.toolbar_actions_scroll.viewport().width()
+            if hasattr(self, "toolbar_actions_scroll") and self.toolbar_actions_scroll.viewport().width() > 0
+            else self.toolbar_actions_panel.width()
+            if self.toolbar_actions_panel.width() > 0
+            else width - self.toolbar_controls_panel.maximumWidth()
         )
-        if compact_toolbar:
-            columns = 1 if width < 1080 else 2
+        if actions_width >= 960:
+            columns = 5
+        elif actions_width >= 760:
+            columns = 4
+        elif actions_width >= 560:
+            columns = 3
+        elif actions_width >= 360:
+            columns = 2
         else:
-            if actions_width >= 1180:
-                columns = 4
-            elif actions_width >= 860:
-                columns = 3
-            elif actions_width >= 560:
-                columns = 2
-            else:
-                columns = 1
+            columns = 1
 
         self._relayout_action_cards(columns)
 
@@ -3522,16 +3581,14 @@ class InpaintingMaskEditor(QDialog):
         rows = max(1, (len(visible_cards) + columns - 1) // columns)
         controls_height = self.toolbar_controls_panel.sizeHint().height()
         actions_height = self.toolbar_actions_grid_host.sizeHint().height()
-        if compact_toolbar:
-            target_height = controls_height + actions_height + max(20, int(round(18 * scale)))
-            self.top_toolbar.setMinimumHeight(target_height)
-            self.top_toolbar.setMaximumHeight(max(target_height, actions_height + controls_height + 24))
-        else:
-            base_height = max(controls_height, actions_height)
-            if rows > 1:
-                base_height = max(base_height, int(round(126 * scale)))
-            self.top_toolbar.setMinimumHeight(base_height + max(10, int(round(8 * scale))))
-            self.top_toolbar.setMaximumHeight(max(base_height + 18, int(round((116 if rows == 1 else 154) * scale))))
+        visible_actions_height = min(actions_height, getattr(self.toolbar_actions_scroll, "maximumHeight", lambda: actions_height)())
+        base_height = max(controls_height, visible_actions_height)
+        if compact_toolbar and rows > 1:
+            base_height = max(base_height, int(round(98 * scale)))
+        toolbar_padding = max(8, int(round(8 * scale)))
+        target_height = base_height + toolbar_padding
+        self.top_toolbar.setMinimumHeight(target_height)
+        self.top_toolbar.setMaximumHeight(max(target_height, int(round(146 * scale))))
         self.top_toolbar.updateGeometry()
 
     def resizeEvent(self, event):
@@ -3556,7 +3613,7 @@ class InpaintingMaskEditor(QDialog):
                 # Plain Left arrow - Previous frame (backward compatibility)
                 new_index = max(0, self.current_frame_index - 1)
                 self._manual_navigation = True
-                self.on_frame_changed(new_index)
+                self.on_frame_changed(new_index, propagate_brush_mask=True)
         elif event.key() == Qt.Key_Right:
             if event.modifiers() & Qt.AltModifier:
                 # Alt+Right - Jump to next keyframe/mask based on current mode
@@ -3565,7 +3622,7 @@ class InpaintingMaskEditor(QDialog):
                 # Plain Right arrow - Next frame (backward compatibility)
                 new_index = min(len(self.video_frames) - 1, self.current_frame_index + 1)
                 self._manual_navigation = True
-                self.on_frame_changed(new_index)
+                self.on_frame_changed(new_index, propagate_brush_mask=True)
         elif event.key() == Qt.Key_E:
             # Pass to mask widget for temporary tool handling
             self.mask_widget.keyPressEvent(event)
@@ -4387,6 +4444,8 @@ class MaskDrawingWidget(QWidget):
         state["frame"] = current_frame
 
         self._push_undo_snapshot(state)
+        if hasattr(self.parent_editor, "remember_recent_brush_navigation_mask"):
+            self.parent_editor.remember_recent_brush_navigation_mask(self.parent_editor.mask_frames[current_frame])
         self.parent_editor.update_mask_frame_tracking()
         return True
 
