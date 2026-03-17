@@ -599,6 +599,7 @@ class InpaintingMaskEditor(QDialog):
         action_card_min_width = max(150, int(round(172 * self._ui_scale)))
         action_card_spacing = max(4, int(round(6 * self._ui_scale)))
         value_chip_min_width = max(32, int(round(36 * self._ui_scale)))
+        self._action_card_spacing = action_card_spacing
 
         # Enable keyboard shortcuts
         self.setFocusPolicy(Qt.StrongFocus)
@@ -2110,6 +2111,41 @@ class InpaintingMaskEditor(QDialog):
 
         return self.remember_recent_brush_navigation_mask(visible_mask, delta=delta_mask)
 
+    def _render_effective_mask_for_frame(self, frame_index):
+        if frame_index < 0 or frame_index >= len(self.mask_frames):
+            return None
+
+        base_mask = self.mask_frames[frame_index]
+        if base_mask is None:
+            return None
+
+        rendered_mask = base_mask.copy()
+        if self.drawing_mode not in ["shape", "liquify"] or not hasattr(self.mask_widget, "shape_keyframes"):
+            return rendered_mask
+
+        shape_mask = np.zeros_like(rendered_mask)
+        shapes = self.mask_widget.get_shapes_for_frame(frame_index)
+        for shape in shapes:
+            if not shape.get("visible", True):
+                continue
+            vertices = shape.get("vertices") or []
+            if len(vertices) < 3:
+                continue
+            if self.mask_widget.should_use_smooth_shapes() and len(vertices) >= 3:
+                smooth_vertices = self.mask_widget.generate_smooth_vertices_for_mask(vertices, shape.get("closed", True))
+                if len(smooth_vertices) >= 3:
+                    cv2.fillPoly(shape_mask, [np.array(smooth_vertices, dtype=np.int32)], 255)
+            else:
+                cv2.fillPoly(shape_mask, [np.array(vertices, dtype=np.int32)], 255)
+
+        rendered_mask = cv2.bitwise_or(rendered_mask, shape_mask)
+
+        if hasattr(self.mask_widget, "_temp_interpolated_shapes") and frame_index in self.mask_widget._temp_interpolated_shapes:
+            temp_mask = self.mask_widget._temp_interpolated_shapes[frame_index]
+            rendered_mask = cv2.bitwise_or(rendered_mask, temp_mask)
+
+        return rendered_mask
+
     def _should_propagate_active_brush_mask(self):
         return (
             self.drawing_mode in ["brush", "shape", "liquify"] and
@@ -2150,7 +2186,7 @@ class InpaintingMaskEditor(QDialog):
 
         current_mask = self._recent_brush_navigation_delta.copy()
         for frame_i in valid_frames:
-            existing_mask = self.mask_frames[frame_i]
+            existing_mask = self._render_effective_mask_for_frame(frame_i)
             if existing_mask is None:
                 merged_mask = current_mask.copy()
             else:
@@ -2171,7 +2207,7 @@ class InpaintingMaskEditor(QDialog):
         if self.drawing_mode in ["shape", "liquify"] and hasattr(self.mask_widget, "shape_keyframes"):
             if hasattr(self.mask_widget, "_temp_interpolated_shapes"):
                 self.mask_widget._temp_interpolated_shapes.pop(current_frame, None)
-            self.bootstrap_shape_keyframes_from_masks(frame_indices=[current_frame] + valid_frames)
+            self.bootstrap_shape_keyframes_from_masks(frame_indices=[current_frame] + valid_frames, overwrite_existing=True)
             if hasattr(self.mask_widget, "invalidate_shape_cache"):
                 self.mask_widget.invalidate_shape_cache()
 
@@ -2398,7 +2434,7 @@ class InpaintingMaskEditor(QDialog):
 
         return shapes
 
-    def bootstrap_shape_keyframes_from_masks(self, target_vertices=None, frame_indices=None):
+    def bootstrap_shape_keyframes_from_masks(self, target_vertices=None, frame_indices=None, overwrite_existing=False):
         if not hasattr(self.mask_widget, 'shape_keyframes'):
             self.mask_widget.shape_keyframes = {}
 
@@ -2412,17 +2448,21 @@ class InpaintingMaskEditor(QDialog):
         for frame_index in frame_indices:
             if frame_index < 0 or frame_index >= len(self.mask_frames):
                 continue
-            if self.mask_widget.shape_keyframes.get(frame_index):
+            if self.mask_widget.shape_keyframes.get(frame_index) and not overwrite_existing:
                 continue
 
             frame_mask = self.mask_frames[frame_index]
             if frame_mask is None or not np.any(frame_mask > 0):
+                if overwrite_existing:
+                    self.mask_widget.shape_keyframes.pop(frame_index, None)
                 continue
 
             generated_shapes = self._shape_keyframes_from_mask(frame_mask, target_vertices=target_vertices)
             if generated_shapes:
                 self.mask_widget.shape_keyframes[frame_index] = generated_shapes
                 generated_frames.append(frame_index)
+            elif overwrite_existing:
+                self.mask_widget.shape_keyframes.pop(frame_index, None)
 
         if generated_frames:
             self.mask_widget.invalidate_shape_cache()
@@ -3624,8 +3664,17 @@ class InpaintingMaskEditor(QDialog):
             columns = 1
 
         self._relayout_action_cards(columns)
-
         visible_cards = [card for card in getattr(self, "action_cards", []) if card.isVisible()]
+        gap = getattr(self, "_action_card_spacing", 0)
+        column_width = max(0, int((actions_width - gap * max(0, columns - 1)) / max(1, columns)))
+        for column in range(max(columns, 6)):
+            self.toolbar_actions_grid.setColumnMinimumWidth(column, column_width if column < columns else 0)
+        for card in visible_cards:
+            card.setMinimumWidth(column_width)
+            if columns > 1:
+                card.setMaximumWidth(column_width)
+            else:
+                card.setMaximumWidth(16777215)
         rows = max(1, (len(visible_cards) + columns - 1) // columns)
         controls_height = self.toolbar_controls_panel.sizeHint().height()
         actions_height = self.toolbar_actions_grid_host.sizeHint().height()
@@ -5110,6 +5159,7 @@ class MaskDrawingWidget(QWidget):
                         self.parent_editor.timeline_widget.mask_frames.discard(frame)
                     self.parent_editor.timeline_widget.update()
                     self.parent_editor.update_navigation_buttons()
+                    self.parent_editor.remember_recent_brush_navigation_mask(self.mask.copy(), delta=filled_mask.copy())
                 
                 self.temp_shape_mask = None
                 return
@@ -5208,6 +5258,7 @@ class MaskDrawingWidget(QWidget):
                     self.parent_editor.timeline_widget.mask_frames.discard(frame)
                 self.parent_editor.timeline_widget.update()
                 self.parent_editor.update_navigation_buttons()
+                self.parent_editor.remember_recent_brush_navigation_mask(self.mask.copy(), delta=filled_mask.copy())
             
             # Clear temp mask
             self.temp_shape_mask = None
