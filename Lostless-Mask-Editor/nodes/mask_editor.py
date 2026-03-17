@@ -560,6 +560,9 @@ class InpaintingMaskEditor(QDialog):
         self._recent_brush_navigation_mask = None
         self._recent_brush_navigation_delta = None
         self._recent_brush_navigation_source_frame = None
+        self._recent_brush_navigation_last_frame = None
+        self._recent_brush_navigation_direction = 0
+        self._recent_brush_navigation_applied_frames = set()
         
         self.init_ui()
         
@@ -645,7 +648,8 @@ class InpaintingMaskEditor(QDialog):
         toolbar_actions_layout.addWidget(toolbar_actions_scroll)
 
         toolbar_controls_panel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
-        toolbar_actions_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        toolbar_actions_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        toolbar_actions_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         top_toolbar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
         toolbar_shell_layout.addWidget(toolbar_controls_panel, 0)
@@ -1958,6 +1962,9 @@ class InpaintingMaskEditor(QDialog):
         # Stop playback if user manually navigates to different frame (but not during automatic playback)
         if self.is_playing and hasattr(self, '_manual_navigation') and self._manual_navigation:
             self.pause_playback()
+
+        if not propagate_brush_mask:
+            self.clear_recent_brush_navigation_mask()
         
         # Before changing frames, check for temporary interpolated shapes
         # Skip this check if we're doing keyframe navigation (Alt+Arrow)
@@ -1991,11 +1998,18 @@ class InpaintingMaskEditor(QDialog):
                 # Bake the current liquify deformations into the keyframe
                 self.mask_widget.bake_liquify_deformation()
 
+        carried_frames = []
         if propagate_brush_mask:
             self._seed_navigation_delta_from_visible_mask()
-            self._propagate_active_brush_mask([index])
+            carried_frames = self._plan_navigation_carry_frames(index)
+            if carried_frames:
+                self._propagate_active_brush_mask(carried_frames)
         
         self.current_frame_index = index
+        if self._should_propagate_active_brush_mask():
+            self._recent_brush_navigation_last_frame = int(index)
+            if carried_frames:
+                self._recent_brush_navigation_applied_frames.update(int(frame) for frame in carried_frames)
         # Frame change - shapes will be recalculated
         # Update timeline widget current frame
         self.timeline_widget.setCurrentFrame(index)
@@ -2061,6 +2075,9 @@ class InpaintingMaskEditor(QDialog):
         self._recent_brush_navigation_mask = None
         self._recent_brush_navigation_delta = None
         self._recent_brush_navigation_source_frame = None
+        self._recent_brush_navigation_last_frame = None
+        self._recent_brush_navigation_direction = 0
+        self._recent_brush_navigation_applied_frames = set()
 
     def remember_recent_brush_navigation_mask(self, mask=None, delta=None):
         if self.drawing_mode not in ["brush", "shape", "liquify"]:
@@ -2088,7 +2105,52 @@ class InpaintingMaskEditor(QDialog):
         self._recent_brush_navigation_mask = source_mask
         self._recent_brush_navigation_delta = source_delta
         self._recent_brush_navigation_source_frame = int(self.current_frame_index)
+        self._recent_brush_navigation_last_frame = int(self.current_frame_index)
+        self._recent_brush_navigation_direction = 0
+        self._recent_brush_navigation_applied_frames = {int(self.current_frame_index)}
         return True
+
+    def _plan_navigation_carry_frames(self, target_frame):
+        if not self._should_propagate_active_brush_mask():
+            return []
+
+        try:
+            current_frame = int(self.current_frame_index)
+            target_frame = int(target_frame)
+        except Exception:
+            return []
+
+        if target_frame == current_frame:
+            return []
+
+        step = 1 if target_frame > current_frame else -1
+        source_frame = self._recent_brush_navigation_source_frame
+        if source_frame is None:
+            source_frame = current_frame
+            self._recent_brush_navigation_source_frame = current_frame
+
+        if self._recent_brush_navigation_last_frame is None or self._recent_brush_navigation_last_frame != current_frame:
+            self._recent_brush_navigation_last_frame = current_frame
+
+        if self._recent_brush_navigation_direction == 0:
+            self._recent_brush_navigation_direction = step
+        elif step != self._recent_brush_navigation_direction:
+            self.clear_recent_brush_navigation_mask()
+            return []
+
+        if self._recent_brush_navigation_direction > 0 and target_frame < source_frame:
+            self.clear_recent_brush_navigation_mask()
+            return []
+        if self._recent_brush_navigation_direction < 0 and target_frame > source_frame:
+            self.clear_recent_brush_navigation_mask()
+            return []
+
+        traversed_frames = list(range(current_frame + step, target_frame + step, step))
+        return [
+            frame
+            for frame in traversed_frames
+            if frame not in self._recent_brush_navigation_applied_frames
+        ]
 
     def _seed_navigation_delta_from_visible_mask(self):
         if self._recent_brush_navigation_delta is not None:
@@ -2146,6 +2208,40 @@ class InpaintingMaskEditor(QDialog):
 
         return rendered_mask
 
+    def _capture_shape_navigation_boundary_masks(self, frame_indices, movement_direction):
+        if self.drawing_mode not in ["shape", "liquify"] or not hasattr(self.mask_widget, "shape_keyframes"):
+            return {}
+
+        affected_frames = sorted({
+            int(frame_index)
+            for frame_index in frame_indices
+            if 0 <= int(frame_index) < len(self.mask_frames)
+        })
+        if not affected_frames:
+            return {}
+
+        boundary_masks = {}
+        if movement_direction > 0:
+            boundary_candidates = [affected_frames[-1] + 1]
+        elif movement_direction < 0:
+            boundary_candidates = [affected_frames[0] - 1]
+        else:
+            boundary_candidates = []
+
+        for frame_index in boundary_candidates:
+            if frame_index < 0 or frame_index >= len(self.mask_frames):
+                continue
+            if frame_index in affected_frames or frame_index in self.mask_widget.shape_keyframes:
+                continue
+
+            rendered_mask = self._render_effective_mask_for_frame(frame_index)
+            if rendered_mask is None:
+                continue
+
+            boundary_masks[frame_index] = rendered_mask.copy()
+
+        return boundary_masks
+
     def _should_propagate_active_brush_mask(self):
         return (
             self.drawing_mode in ["brush", "shape", "liquify"] and
@@ -2169,10 +2265,13 @@ class InpaintingMaskEditor(QDialog):
             return False
 
         current_frame = int(self.current_frame_index)
+        affected_frames = [current_frame] + valid_frames
+        movement_direction = valid_frames[-1] - current_frame
+        boundary_masks = self._capture_shape_navigation_boundary_masks(affected_frames, movement_direction)
         state = self.mask_widget._capture_state(
             description="Propagate brush mask",
             full_snapshot=False,
-            affected_frames=[current_frame] + valid_frames,
+            affected_frames=affected_frames + list(boundary_masks.keys()),
         )
 
         changed = False
@@ -2195,6 +2294,12 @@ class InpaintingMaskEditor(QDialog):
                 changed = True
             self.mask_frames[frame_i] = merged_mask
 
+        for frame_i, preserved_mask in boundary_masks.items():
+            existing_mask = self.mask_frames[frame_i]
+            if existing_mask is None or not np.array_equal(existing_mask, preserved_mask):
+                changed = True
+                self.mask_frames[frame_i] = preserved_mask.copy()
+
         if not changed:
             return False
 
@@ -2207,7 +2312,9 @@ class InpaintingMaskEditor(QDialog):
         if self.drawing_mode in ["shape", "liquify"] and hasattr(self.mask_widget, "shape_keyframes"):
             if hasattr(self.mask_widget, "_temp_interpolated_shapes"):
                 self.mask_widget._temp_interpolated_shapes.pop(current_frame, None)
-            self.bootstrap_shape_keyframes_from_masks(frame_indices=[current_frame] + valid_frames, overwrite_existing=True)
+            self.bootstrap_shape_keyframes_from_masks(frame_indices=affected_frames, overwrite_existing=True)
+            if boundary_masks:
+                self.bootstrap_shape_keyframes_from_masks(frame_indices=list(boundary_masks.keys()))
             if hasattr(self.mask_widget, "invalidate_shape_cache"):
                 self.mask_widget.invalidate_shape_cache()
 
@@ -3639,12 +3746,8 @@ class InpaintingMaskEditor(QDialog):
         self.toolbar_shell_layout.setStretch(0, 0)
         self.toolbar_shell_layout.setStretch(1, 1)
 
-        self.toolbar_controls_panel.setMaximumWidth(max(360, int(width * 0.30)))
+        self.toolbar_controls_panel.setMaximumWidth(max(340, int(width * 0.28)))
         self.toolbar_actions_panel.setMaximumWidth(16777215)
-        if hasattr(self, "toolbar_actions_scroll"):
-            max_actions_height = max(88, min(int(height * 0.26), int(round(190 * scale))))
-            self.toolbar_actions_scroll.setMinimumHeight(0)
-            self.toolbar_actions_scroll.setMaximumHeight(max_actions_height)
 
         actions_width = max(
             1,
@@ -3678,14 +3781,26 @@ class InpaintingMaskEditor(QDialog):
         rows = max(1, (len(visible_cards) + columns - 1) // columns)
         controls_height = self.toolbar_controls_panel.sizeHint().height()
         actions_height = self.toolbar_actions_grid_host.sizeHint().height()
+        toolbar_padding = max(8, int(round(8 * scale)))
+        toolbar_height_budget = max(
+            136,
+            min(
+                int(height * (0.38 if compact_toolbar else 0.34)),
+                int(round((320 if compact_toolbar else 360) * max(scale, 0.92))),
+            ),
+        )
+        if hasattr(self, "toolbar_actions_scroll"):
+            max_actions_height = max(96, toolbar_height_budget - toolbar_padding)
+            min_actions_height = min(actions_height, max(84, int(height * 0.13)))
+            self.toolbar_actions_scroll.setMinimumHeight(min_actions_height)
+            self.toolbar_actions_scroll.setMaximumHeight(max_actions_height)
         visible_actions_height = min(actions_height, getattr(self.toolbar_actions_scroll, "maximumHeight", lambda: actions_height)())
         base_height = max(controls_height, visible_actions_height)
         if compact_toolbar and rows > 1:
-            base_height = max(base_height, int(round(112 * scale)))
-        toolbar_padding = max(8, int(round(8 * scale)))
-        target_height = base_height + toolbar_padding
+            base_height = max(base_height, getattr(self.toolbar_actions_scroll, "minimumHeight", lambda: 0)())
+        target_height = min(base_height + toolbar_padding, toolbar_height_budget)
         self.top_toolbar.setMinimumHeight(target_height)
-        self.top_toolbar.setMaximumHeight(max(target_height, int(round(208 * scale))))
+        self.top_toolbar.setMaximumHeight(toolbar_height_budget)
         self.top_toolbar.updateGeometry()
 
     def resizeEvent(self, event):
@@ -5443,13 +5558,13 @@ class MaskDrawingWidget(QWidget):
         cache_key = (frame, self._cache_key, spline_enabled)
         cached = self._shape_cache_get(cache_key)
         if cached is not None:
-            return cached
+            return [self._clone_shape(shape) for shape in cached]
         
         # If it's a keyframe, return the shapes as-is (don't re-normalize)
         if frame in self.shape_keyframes:
             # Return deep copies to avoid modifying originals
-            shapes = [shape.copy() for shape in self.shape_keyframes[frame]]
-            self._shape_cache_set(cache_key, shapes)
+            shapes = [self._clone_shape(shape) for shape in self.shape_keyframes[frame]]
+            self._shape_cache_set(cache_key, [self._clone_shape(shape) for shape in shapes])
             return shapes
             
         # Find surrounding keyframes
@@ -5495,15 +5610,15 @@ class MaskDrawingWidget(QWidget):
         elif prev_frame is not None:
             # Return copy of keyframe shapes WITHOUT resampling (they're already normalized)
             if self.shape_keyframes[prev_frame]:
-                shapes = [shape.copy() for shape in self.shape_keyframes[prev_frame]]
+                shapes = [self._clone_shape(shape) for shape in self.shape_keyframes[prev_frame]]
         elif next_frame is not None:
             # Return copy of keyframe shapes WITHOUT resampling (they're already normalized)
             if self.shape_keyframes[next_frame]:
-                shapes = [shape.copy() for shape in self.shape_keyframes[next_frame]]
+                shapes = [self._clone_shape(shape) for shape in self.shape_keyframes[next_frame]]
         
         # Cache the result
-        self._shape_cache_set(cache_key, shapes)
-        return shapes
+        self._shape_cache_set(cache_key, [self._clone_shape(shape) for shape in shapes])
+        return [self._clone_shape(shape) for shape in shapes]
     
     def interpolate_shapes(self, shapes1, shapes2, t):
         """Interpolate between two sets of shapes"""
