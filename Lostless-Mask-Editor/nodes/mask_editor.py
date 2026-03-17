@@ -2156,7 +2156,14 @@ class InpaintingMaskEditor(QDialog):
         if not (0 <= self.current_frame_index < len(self.mask_frames)):
             return False
 
-        stored_mask = self.mask_frames[self.current_frame_index]
+        stored_mask = None
+        if self.drawing_mode == "brush" and getattr(self.mask_widget, "is_drawing", False):
+            transaction = getattr(self.mask_widget, "_pixel_brush_transaction", None)
+            if transaction is not None:
+                stored_mask = transaction.get("mask_frames", {}).get(int(self.current_frame_index))
+
+        if stored_mask is None:
+            stored_mask = self.mask_frames[self.current_frame_index]
         visible_mask = self.mask_widget.mask
         if stored_mask is None or visible_mask is None:
             return False
@@ -3853,8 +3860,13 @@ class InpaintingMaskEditor(QDialog):
     
     def keyReleaseEvent(self, event):
         """Handle key release events - pass to mask widget for temporary tool handling"""
-        if event.key() in (Qt.Key_Left, Qt.Key_Right) and not event.modifiers() and not event.isAutoRepeat():
-            self._flush_pending_brush_navigation_mask()
+        if event.key() in (Qt.Key_Left, Qt.Key_Right):
+            if (
+                not event.modifiers() and
+                not event.isAutoRepeat() and
+                not getattr(self.mask_widget, "is_drawing", False)
+            ):
+                self._flush_pending_brush_navigation_mask()
             event.accept()
             return
         self.mask_widget.keyReleaseEvent(event)
@@ -4628,12 +4640,6 @@ class MaskDrawingWidget(QWidget):
         state["frame"] = current_frame
 
         self._push_undo_snapshot(state)
-        if hasattr(self.parent_editor, "remember_recent_brush_navigation_mask"):
-            current_frame_mask = self.parent_editor.mask_frames[current_frame]
-            delta_mask = None
-            if current_original is not None and current_frame_mask is not None:
-                delta_mask = np.where(current_frame_mask > current_original, current_frame_mask, 0).astype(current_frame_mask.dtype, copy=False)
-            self.parent_editor.remember_recent_brush_navigation_mask(current_frame_mask, delta=delta_mask)
         self.parent_editor.update_mask_frame_tracking()
         return True
 
@@ -4985,6 +4991,11 @@ class MaskDrawingWidget(QWidget):
                     self.setCursor(Qt.SizeHorCursor)
                 else:
                     self.setCursor(Qt.ArrowCursor)
+            if (
+                self.parent_editor and
+                getattr(self.parent_editor, "_recent_brush_navigation_pending_frames", None)
+            ):
+                self.parent_editor._flush_pending_brush_navigation_mask()
         elif event.button() == Qt.RightButton and self.adjusting_brush_size:
             self.adjusting_brush_size = False
             self.setCursor(Qt.ArrowCursor)
@@ -8067,7 +8078,13 @@ class MaskDrawingWidget(QWidget):
     
     def keyReleaseEvent(self, event):
         """Handle key release events"""
-        if event.key() in (Qt.Key_Left, Qt.Key_Right) and self.parent_editor:
+        if (
+            event.key() in (Qt.Key_Left, Qt.Key_Right) and
+            self.parent_editor and
+            not event.modifiers() and
+            not event.isAutoRepeat() and
+            not getattr(self, "is_drawing", False)
+        ):
             self.parent_editor.keyReleaseEvent(event)
             event.accept()
             return
