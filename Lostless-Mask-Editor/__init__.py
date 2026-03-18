@@ -410,11 +410,15 @@ class MaskEditor:
         if not os.path.exists(launcher_path):
             raise RuntimeError(f"Mask editor launcher not found: {launcher_path}")
 
-        proc = subprocess.run(
-            [sys.executable, launcher_path, "--config", config_path],
-            capture_output=True,
-            text=True,
-        )
+        run_kwargs = {
+            "args": [sys.executable, launcher_path, "--config", config_path],
+            "capture_output": True,
+            "text": True,
+        }
+        if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
+            run_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+        proc = subprocess.run(**run_kwargs)
 
         if proc.returncode != 0:
             stdout_tail = (proc.stdout or "").strip()[-1000:]
