@@ -555,10 +555,13 @@ class InpaintingMaskEditor(QDialog):
         self._ignore_next_play_click = False
         self._manual_navigation = False  # Flag to track if frame change is manual or automatic
         self._keyframe_navigation = False  # Flag to track if navigation is via Alt+Arrow
-        self.enable_smooth_interpolation = True
-        self.enable_smooth_shapes = True
+        # Keep interpolation behavior configurable via persisted settings.
+        # Default to linear center motion between keyframes to avoid spline drift surprises.
+        self.enable_smooth_interpolation = self.settings.value('mask_editor_spline_interpolation', False, type=bool)
+        self.enable_smooth_shapes = self.settings.value('mask_editor_spline_shapes', True, type=bool)
         self._recent_brush_navigation_mask = None
         self._recent_brush_navigation_delta = None
+        self._recent_brush_navigation_operation = None
         self._recent_brush_navigation_source_frame = None
         self._recent_brush_navigation_last_frame = None
         self._recent_brush_navigation_pending_frames = set()
@@ -982,6 +985,14 @@ class InpaintingMaskEditor(QDialog):
         self.fill_holes_check.setChecked(saved_fill_holes)
         self.fill_holes_check.stateChanged.connect(self.on_fill_holes_changed)
         toolbar_layout.addWidget(self.fill_holes_check)
+
+        saved_show_mask_overlay = self.settings.value('mask_editor_show_mask_overlay', True, type=bool)
+        self.mask_visibility_btn = QPushButton()
+        self.mask_visibility_btn.setToolTip("Toggle mask overlay visibility")
+        self.mask_visibility_btn.clicked.connect(self.toggle_mask_visibility)
+        self.mask_visibility_btn.setMinimumWidth(max(90, int(round(100 * self._ui_scale))))
+        self._set_mask_visibility_button_state(saved_show_mask_overlay)
+        toolbar_layout.addWidget(self.mask_visibility_btn)
         
         # Show lattice checkbox for liquify mode
         self.show_lattice_check = QCheckBox("Show lattice")
@@ -1327,6 +1338,7 @@ class InpaintingMaskEditor(QDialog):
         self.mask_widget.set_brush_size(saved_brush_size)
         self.mask_widget.target_vertex_count = initial_vertex_count
         self.mask_widget.show_lattice = saved_show_lattice
+        self.mask_widget.show_mask_overlay = saved_show_mask_overlay
         self.mask_widget.liquify_grid_size = saved_lattice_size
         self.mask_widget._last_brush_mode = self.initial_mode if self.initial_mode in ["brush", "shape"] else "brush"
         
@@ -1521,6 +1533,8 @@ class InpaintingMaskEditor(QDialog):
         
         # Store the previous mode for later checks
         previous_mode = self.drawing_mode
+        if mode != previous_mode:
+            self._close_pending_brush_navigation_session()
         
         # When leaving liquify mode, bake the changes BEFORE changing modes
         if previous_mode == "liquify" and mode != "liquify":
@@ -1680,6 +1694,8 @@ class InpaintingMaskEditor(QDialog):
         
     def set_tool(self, tool):
         """Set the current active tool"""
+        if tool != getattr(self.mask_widget, "current_tool", None):
+            self._close_pending_brush_navigation_session()
         self.mask_widget.set_current_tool(tool)
         
     def select_brush_mode(self):
@@ -1902,6 +1918,25 @@ class InpaintingMaskEditor(QDialog):
         """Handle fill holes checkbox state change"""
         # Save to settings
         self.settings.setValue('mask_editor_fill_holes', state == Qt.Checked)
+
+    def _set_mask_visibility_button_state(self, show_mask):
+        if not hasattr(self, "mask_visibility_btn"):
+            return
+        if show_mask:
+            self.mask_visibility_btn.setText("Hide Mask")
+            self.mask_visibility_btn.setToolTip("Hide drawn mask overlay")
+        else:
+            self.mask_visibility_btn.setText("Show Mask")
+            self.mask_visibility_btn.setToolTip("Show drawn mask overlay")
+
+    def toggle_mask_visibility(self):
+        if not hasattr(self, "mask_widget"):
+            return
+        show_mask = not bool(getattr(self.mask_widget, "show_mask_overlay", True))
+        self.mask_widget.show_mask_overlay = show_mask
+        self.settings.setValue('mask_editor_show_mask_overlay', show_mask)
+        self._set_mask_visibility_button_state(show_mask)
+        self.mask_widget.update()
         
     def on_show_lattice_changed(self, state):
         """Handle show lattice checkbox state change"""
@@ -1935,8 +1970,9 @@ class InpaintingMaskEditor(QDialog):
     
     def on_spline_interpolation_changed(self, state):
         """Handle smooth interpolation checkbox state change"""
+        self.enable_smooth_interpolation = (state == Qt.Checked)
         # Save to settings
-        self.settings.setValue('mask_editor_spline_interpolation', state == Qt.Checked)
+        self.settings.setValue('mask_editor_spline_interpolation', self.enable_smooth_interpolation)
         # Invalidate shape cache to trigger re-interpolation with new method
         if hasattr(self.mask_widget, 'invalidate_shape_cache'):
             self.mask_widget.invalidate_shape_cache()
@@ -1949,8 +1985,9 @@ class InpaintingMaskEditor(QDialog):
         
     def on_spline_shapes_changed(self, state):
         """Handle smooth shapes checkbox state change"""
+        self.enable_smooth_shapes = (state == Qt.Checked)
         # Save to settings
-        self.settings.setValue('mask_editor_spline_shapes', state == Qt.Checked)
+        self.settings.setValue('mask_editor_spline_shapes', self.enable_smooth_shapes)
         # Force immediate recalculation of masks from shapes with new rendering method
         self.mask_widget.update_mask_from_shapes()
         # Trigger immediate redraw of current shapes
@@ -2011,11 +2048,15 @@ class InpaintingMaskEditor(QDialog):
             queued_frames = self._queue_navigation_carry_frames(index)
             if (
                 queued_frames and
-                self.drawing_mode in ["brush", "shape"] and
+                self.drawing_mode in ["brush", "shape", "eraser"] and
                 self._has_live_navigation_delta_source()
             ):
                 frames_to_apply = queued_frames
                 if self.drawing_mode == "shape":
+                    source_frame = self._recent_brush_navigation_source_frame
+                    if source_frame is not None and int(self.current_frame_index) == int(source_frame):
+                        frames_to_apply = [int(source_frame)] + queued_frames
+                if self.drawing_mode == "eraser":
                     source_frame = self._recent_brush_navigation_source_frame
                     if source_frame is not None and int(self.current_frame_index) == int(source_frame):
                         frames_to_apply = [int(source_frame)] + queued_frames
@@ -2093,9 +2134,22 @@ class InpaintingMaskEditor(QDialog):
     def clear_recent_brush_navigation_mask(self):
         self._recent_brush_navigation_mask = None
         self._recent_brush_navigation_delta = None
+        self._recent_brush_navigation_operation = None
         self._recent_brush_navigation_source_frame = None
         self._recent_brush_navigation_last_frame = None
         self._recent_brush_navigation_pending_frames = set()
+
+    def _close_pending_brush_navigation_session(self):
+        pending_frames = getattr(self, "_recent_brush_navigation_pending_frames", set())
+        if not pending_frames:
+            return False
+
+        # Tool/mode switches mid-stroke should never replay pending carry under a new mode.
+        if getattr(self.mask_widget, "is_drawing", False):
+            self.clear_recent_brush_navigation_mask()
+            return False
+
+        return self._flush_pending_brush_navigation_mask()
 
     def _has_live_navigation_delta_source(self):
         if not hasattr(self, "mask_widget"):
@@ -2105,6 +2159,12 @@ class InpaintingMaskEditor(QDialog):
             return (
                 getattr(self.mask_widget, "is_drawing", False) and
                 getattr(self.mask_widget, "_pixel_brush_transaction", None) is not None
+            )
+
+        if self.drawing_mode == "eraser":
+            return (
+                getattr(self.mask_widget, "is_drawing", False) and
+                len(getattr(self.mask_widget, "current_stroke_points", [])) > 0
             )
 
         if self.drawing_mode == "shape":
@@ -2118,8 +2178,8 @@ class InpaintingMaskEditor(QDialog):
 
         return False
 
-    def remember_recent_brush_navigation_mask(self, mask=None, delta=None):
-        if self.drawing_mode not in ["brush", "shape", "liquify"]:
+    def remember_recent_brush_navigation_mask(self, mask=None, delta=None, operation="add"):
+        if self.drawing_mode not in ["brush", "shape", "liquify", "eraser"]:
             self.clear_recent_brush_navigation_mask()
             return False
 
@@ -2143,6 +2203,7 @@ class InpaintingMaskEditor(QDialog):
 
         self._recent_brush_navigation_mask = source_mask
         self._recent_brush_navigation_delta = source_delta
+        self._recent_brush_navigation_operation = operation if operation in ("add", "erase") else "add"
         self._recent_brush_navigation_source_frame = int(self.current_frame_index)
         self._recent_brush_navigation_last_frame = int(self.current_frame_index)
         self._recent_brush_navigation_pending_frames = set()
@@ -2193,7 +2254,7 @@ class InpaintingMaskEditor(QDialog):
         return changed
 
     def _seed_navigation_delta_from_visible_mask(self):
-        if self.drawing_mode not in ["brush", "shape", "liquify"]:
+        if self.drawing_mode not in ["brush", "shape", "liquify", "eraser"]:
             return False
         if not hasattr(self, "mask_widget") or self.mask_widget.mask is None:
             return False
@@ -2201,18 +2262,26 @@ class InpaintingMaskEditor(QDialog):
             return False
 
         live_delta_source = self._has_live_navigation_delta_source()
-        if self.drawing_mode in ["brush", "shape"]:
+        if self.drawing_mode in ["brush", "shape", "eraser"]:
             if not live_delta_source:
                 self.clear_recent_brush_navigation_mask()
                 return False
 
             visible_mask = self.mask_widget.mask
+            if self.drawing_mode == "eraser":
+                stroke_mask = self.mask_widget.build_active_eraser_stroke_mask()
+                if stroke_mask is None or stroke_mask.size == 0 or not np.any(stroke_mask > 0):
+                    return False
+                return self.remember_recent_brush_navigation_mask(visible_mask, delta=stroke_mask, operation="erase")
+
             if self.drawing_mode == "shape":
                 temp_shape_mask = getattr(self.mask_widget, "temp_shape_mask", None)
                 if temp_shape_mask is None or visible_mask is None:
                     return False
+                if getattr(self.mask_widget, "shape_eraser_mode", False):
+                    return self.remember_recent_brush_navigation_mask(visible_mask, delta=temp_shape_mask, operation="erase")
                 combined_mask = np.maximum(visible_mask, temp_shape_mask)
-                return self.remember_recent_brush_navigation_mask(combined_mask, delta=temp_shape_mask)
+                return self.remember_recent_brush_navigation_mask(combined_mask, delta=temp_shape_mask, operation="add")
 
             stored_mask = None
             transaction = getattr(self.mask_widget, "_pixel_brush_transaction", None)
@@ -2225,7 +2294,7 @@ class InpaintingMaskEditor(QDialog):
             if delta_mask.size == 0 or not np.any(delta_mask > 0):
                 return False
 
-            return self.remember_recent_brush_navigation_mask(visible_mask, delta=delta_mask)
+            return self.remember_recent_brush_navigation_mask(visible_mask, delta=delta_mask, operation="add")
 
         if self._recent_brush_navigation_delta is not None:
             return True
@@ -2240,7 +2309,7 @@ class InpaintingMaskEditor(QDialog):
         if delta_mask.size == 0 or not np.any(delta_mask > 0):
             return False
 
-        return self.remember_recent_brush_navigation_mask(visible_mask, delta=delta_mask)
+        return self.remember_recent_brush_navigation_mask(visible_mask, delta=delta_mask, operation="add")
 
     def _render_effective_mask_for_frame(self, frame_index):
         if frame_index < 0 or frame_index >= len(self.mask_frames):
@@ -2279,8 +2348,9 @@ class InpaintingMaskEditor(QDialog):
 
     def _should_propagate_active_brush_mask(self):
         return (
-            self.drawing_mode in ["brush", "shape", "liquify"] and
-            self._recent_brush_navigation_delta is not None
+            self.drawing_mode in ["brush", "shape", "liquify", "eraser"] and
+            self._recent_brush_navigation_delta is not None and
+            getattr(self, "_recent_brush_navigation_operation", "add") in ("add", "erase")
         )
 
     def _propagate_active_brush_mask(self, frame_indices, capture_undo=True):
@@ -2328,13 +2398,20 @@ class InpaintingMaskEditor(QDialog):
 
         changed = False
 
-        current_mask = self._recent_brush_navigation_delta.copy()
+        delta_mask = self._recent_brush_navigation_delta.copy()
+        operation = getattr(self, "_recent_brush_navigation_operation", "add")
         for frame_i in valid_frames:
             existing_mask = self._render_effective_mask_for_frame(frame_i)
-            if existing_mask is None:
-                merged_mask = current_mask.copy()
+            if operation == "erase":
+                if existing_mask is None:
+                    merged_mask = np.zeros_like(delta_mask)
+                else:
+                    merged_mask = existing_mask.copy()
+                    merged_mask[delta_mask > 0] = 0
+            elif existing_mask is None:
+                merged_mask = delta_mask.copy()
             else:
-                merged_mask = np.maximum(existing_mask, current_mask)
+                merged_mask = np.maximum(existing_mask, delta_mask)
             if not np.array_equal(merged_mask, existing_mask):
                 changed = True
             self.mask_frames[frame_i] = merged_mask
@@ -4370,6 +4447,7 @@ class MaskDrawingWidget(QWidget):
         # Display properties
         self.scaled_pixmap = None
         self.display_rect = QRect()
+        self.show_mask_overlay = True
         
         # Space key state
         self.space_pressed = False
@@ -4715,6 +4793,27 @@ class MaskDrawingWidget(QWidget):
         self.parent_editor.update_mask_frame_tracking()
         return True
 
+    def build_active_eraser_stroke_mask(self):
+        """Build a binary mask for the currently drawn eraser stroke."""
+        if self.mask is None:
+            return None
+
+        stroke_points = getattr(self, "current_stroke_points", None) or []
+        if not stroke_points:
+            return None
+
+        stroke_mask = np.zeros_like(self.mask)
+        if len(stroke_points) == 1:
+            pt = tuple(map(int, stroke_points[0]))
+            cv2.circle(stroke_mask, pt, self.brush_size, 255, -1)
+            return stroke_mask
+
+        for i in range(1, len(stroke_points)):
+            pt1 = tuple(map(int, stroke_points[i - 1]))
+            pt2 = tuple(map(int, stroke_points[i]))
+            cv2.line(stroke_mask, pt1, pt2, 255, self.brush_size * 2)
+        return stroke_mask
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             # Check for Alt modifier first for timeline scrubbing
@@ -4816,6 +4915,8 @@ class MaskDrawingWidget(QWidget):
                     # Regular brush/eraser mode
                     if self.drawing_mode == "eraser":
                         # Start eraser stroke for boolean operation
+                        if self.parent_editor:
+                            self.parent_editor.clear_recent_brush_navigation_mask()
                         self.is_drawing = True
                         self.current_stroke_points = []
                         self.last_point = event.pos()  # Track last point for preview
@@ -5049,7 +5150,7 @@ class MaskDrawingWidget(QWidget):
                     self.commit_pixel_brush_transaction()
                 if (
                     self.parent_editor and
-                    self.drawing_mode in ["brush", "shape"] and
+                    self.drawing_mode in ["brush", "shape", "eraser"] and
                     not getattr(self.parent_editor, "_recent_brush_navigation_pending_frames", None)
                 ):
                     self.parent_editor.clear_recent_brush_navigation_mask()
@@ -5629,6 +5730,7 @@ class MaskDrawingWidget(QWidget):
         if frame in self.shape_keyframes:
             # Return deep copies to avoid modifying originals
             shapes = [self._clone_shape(shape) for shape in self.shape_keyframes[frame]]
+            shapes = self._clamp_shapes_to_video_bounds(shapes)
             self._shape_cache_set(cache_key, [self._clone_shape(shape) for shape in shapes])
             return shapes
             
@@ -5680,11 +5782,118 @@ class MaskDrawingWidget(QWidget):
             # Return copy of keyframe shapes WITHOUT resampling (they're already normalized)
             if self.shape_keyframes[next_frame]:
                 shapes = [self._clone_shape(shape) for shape in self.shape_keyframes[next_frame]]
+
+        shapes = self._clamp_shapes_to_video_bounds(shapes)
         
         # Cache the result
         self._shape_cache_set(cache_key, [self._clone_shape(shape) for shape in shapes])
         return [self._clone_shape(shape) for shape in shapes]
-    
+
+    def _align_vertices_for_interpolation(self, reference_vertices, candidate_vertices):
+        """Rotate/reverse candidate vertices to best match reference vertex correspondence."""
+        if len(reference_vertices) != len(candidate_vertices) or len(reference_vertices) < 3:
+            return [list(v) for v in candidate_vertices]
+
+        ref = np.asarray(reference_vertices, dtype=np.float32)
+        cand = np.asarray(candidate_vertices, dtype=np.float32)
+
+        ref_centered = ref - np.mean(ref, axis=0, keepdims=True)
+        cand_centered = cand - np.mean(cand, axis=0, keepdims=True)
+
+        best_score = float("inf")
+        best_vertices = cand
+
+        for centered_variant, original_variant in (
+            (cand_centered, cand),
+            (cand_centered[::-1], cand[::-1]),
+        ):
+            for shift in range(len(reference_vertices)):
+                shifted_centered = np.roll(centered_variant, -shift, axis=0)
+                diff = ref_centered - shifted_centered
+                score = float(np.mean(np.sum(diff * diff, axis=1)))
+                if score < best_score:
+                    best_score = score
+                    best_vertices = np.roll(original_variant, -shift, axis=0)
+
+        return best_vertices.tolist()
+
+    def _enforce_linear_centroid_motion(self, start_vertices, end_vertices, interpolated_vertices, t):
+        """Keep interpolated shape centroid on the linear path between keyframe centroids."""
+        if not interpolated_vertices:
+            return interpolated_vertices
+
+        start_arr = np.asarray(start_vertices, dtype=np.float32)
+        end_arr = np.asarray(end_vertices, dtype=np.float32)
+        interp_arr = np.asarray(interpolated_vertices, dtype=np.float32)
+
+        if start_arr.size == 0 or end_arr.size == 0 or interp_arr.size == 0:
+            return interpolated_vertices
+
+        start_centroid = np.mean(start_arr, axis=0)
+        end_centroid = np.mean(end_arr, axis=0)
+        current_centroid = np.mean(interp_arr, axis=0)
+        target_centroid = start_centroid * (1.0 - t) + end_centroid * t
+
+        delta = target_centroid - current_centroid
+        return (interp_arr + delta).tolist()
+
+    def _get_active_shape_bounds(self):
+        """Return current editable frame bounds as (width, height)."""
+        if self.mask is not None and getattr(self.mask, "size", 0) > 0 and getattr(self.mask, "ndim", 0) >= 2:
+            h, w = self.mask.shape[:2]
+            return int(w), int(h)
+
+        if self.video_frame is not None and getattr(self.video_frame, "size", 0) > 0:
+            h, w = self.video_frame.shape[:2]
+            return int(w), int(h)
+
+        if self.parent_editor and hasattr(self.parent_editor, "video_frames"):
+            frames = self.parent_editor.video_frames
+            frame_index = int(getattr(self.parent_editor, "current_frame_index", 0))
+            if frames and 0 <= frame_index < len(frames):
+                h, w = frames[frame_index].shape[:2]
+                return int(w), int(h)
+
+        return None, None
+
+    def _clamp_vertices_to_video_bounds(self, vertices):
+        """Clamp vertices so masks stay inside the visible video frame."""
+        if not vertices:
+            return vertices
+
+        width, height = self._get_active_shape_bounds()
+        if width is None or height is None or width <= 0 or height <= 0:
+            return vertices
+
+        max_x = float(width - 1)
+        max_y = float(height - 1)
+        clamped = []
+        for vertex in vertices:
+            if not isinstance(vertex, (list, tuple, np.ndarray)) or len(vertex) < 2:
+                clamped.append(vertex)
+                continue
+            x = float(vertex[0])
+            y = float(vertex[1])
+            clamped.append([
+                min(max(x, 0.0), max_x),
+                min(max(y, 0.0), max_y),
+            ])
+        return clamped
+
+    def _clamp_shapes_to_video_bounds(self, shapes):
+        """Clamp all shapes to active frame bounds."""
+        if not shapes:
+            return shapes
+
+        bounded_shapes = []
+        for shape in shapes:
+            bounded_shape = self._clone_shape(shape)
+            bounded_shape["vertices"] = self._clamp_vertices_to_video_bounds(
+                bounded_shape.get("vertices", [])
+            )
+            bounded_shapes.append(bounded_shape)
+        return bounded_shapes
+
     def interpolate_shapes(self, shapes1, shapes2, t):
         """Interpolate between two sets of shapes"""
         interpolated = []
@@ -5724,6 +5933,9 @@ class MaskDrawingWidget(QWidget):
                         vertices1 = self.resample_vertices_simple(vertices1, target_count)
                     if len(vertices2) != target_count:
                         vertices2 = self.resample_vertices_simple(vertices2, target_count)
+
+                # Align correspondence so interpolation does not twist when keyframes use different start indices.
+                vertices2 = self._align_vertices_for_interpolation(vertices1, vertices2)
                 
                 # Interpolate vertices directly without resampling
                 interp_vertices = []
@@ -5733,6 +5945,8 @@ class MaskDrawingWidget(QWidget):
                         v1[1] * (1 - t) + v2[1] * t
                     ]
                     interp_vertices.append(interp_v)
+
+                interp_vertices = self._clamp_vertices_to_video_bounds(interp_vertices)
                 
                 # Use the interpolated vertices directly without resampling
                 interpolated.append({
@@ -5878,6 +6092,9 @@ class MaskDrawingWidget(QWidget):
                         ]
                         interp_vertices.append(interp_v)
                 else:
+                    # Align correspondence first so spline control points describe the same contour features.
+                    vertices2 = self._align_vertices_for_interpolation(vertices1, vertices2)
+
                     # Apply Catmull-Rom spline interpolation to each vertex
                     interp_vertices = []
                     
@@ -5889,6 +6106,11 @@ class MaskDrawingWidget(QWidget):
                         shapes0 = self.shape_keyframes[prev_prev][i]['vertices']
                     if next_next is not None and i < len(self.shape_keyframes[next_next]):
                         shapes3 = self.shape_keyframes[next_next][i]['vertices']
+
+                    if shapes0 and len(shapes0) == len(vertices1):
+                        shapes0 = self._align_vertices_for_interpolation(vertices1, shapes0)
+                    if shapes3 and len(shapes3) == len(vertices2):
+                        shapes3 = self._align_vertices_for_interpolation(vertices2, shapes3)
                     
                     # Interpolate each vertex pair with spline
                     for j, (v1, v2) in enumerate(zip(vertices1, vertices2)):
@@ -5911,6 +6133,11 @@ class MaskDrawingWidget(QWidget):
                         # Calculate spline point
                         spline_point = self.catmull_rom_point(P0, P1, P2, P3, t)
                         interp_vertices.append(spline_point)
+
+                    # Keep translational motion on the expected straight flight path between keyframes.
+                    interp_vertices = self._enforce_linear_centroid_motion(vertices1, vertices2, interp_vertices, t)
+
+                interp_vertices = self._clamp_vertices_to_video_bounds(interp_vertices)
                 
                 interpolated.append({
                     'vertices': interp_vertices,
@@ -5920,7 +6147,25 @@ class MaskDrawingWidget(QWidget):
                 })
         
         return interpolated
-    
+
+    def _canonicalize_axis_direction(self, axis):
+        """Normalize principal-axis sign so endpoint selection is deterministic across frames."""
+        axis_arr = np.asarray(axis, dtype=np.float32)
+        norm = float(np.linalg.norm(axis_arr))
+        if norm <= 1e-8:
+            return axis_arr
+
+        axis_arr = axis_arr / norm
+        if abs(float(axis_arr[1])) > abs(float(axis_arr[0])):
+            # Mostly vertical: prefer upward direction in image coordinates.
+            if axis_arr[1] > 0:
+                axis_arr = -axis_arr
+        else:
+            # Mostly horizontal: prefer rightward direction.
+            if axis_arr[0] < 0:
+                axis_arr = -axis_arr
+        return axis_arr
+
     def ensure_consistent_winding(self, vertices):
         """Ensure all shapes have counter-clockwise winding order"""
         if len(vertices) < 3:
@@ -6337,6 +6582,9 @@ class MaskDrawingWidget(QWidget):
             idx = np.argsort(eigenvals)[::-1]
             eigenvals = eigenvals[idx]
             eigenvecs = eigenvecs[:, idx]
+
+            principal_axis = self._canonicalize_axis_direction(eigenvecs[:, 0])
+            secondary_axis = np.array([-principal_axis[1], principal_axis[0]], dtype=np.float32)
             
             # Principal axis ratio (how elongated along main axis)
             pca_ratio = eigenvals[0] / max(eigenvals[1], 0.001)
@@ -6410,8 +6658,8 @@ class MaskDrawingWidget(QWidget):
                 'compactness': compactness,
                 'avg_curvature': avg_curvature,
                 'curvature_variance': curvature_variance,
-                'principal_axis': eigenvecs[:, 0],
-                'secondary_axis': eigenvecs[:, 1],
+                'principal_axis': principal_axis,
+                'secondary_axis': secondary_axis,
                 'centroid': centroid,
                 'width': width,
                 'height': height,
@@ -6648,12 +6896,16 @@ class MaskDrawingWidget(QWidget):
             # Use principal axis to find corresponding vertex
             current_points = np.array(vertices, dtype=np.float32)
             current_centroid = current_analysis['centroid']
-            current_principal_axis = current_analysis['principal_axis']
+            current_principal_axis = self._canonicalize_axis_direction(current_analysis['principal_axis'])
             
             # Reference principal axis and position
-            ref_principal_axis = np.array(reference_signature['principal_axis'])
+            ref_principal_axis = self._canonicalize_axis_direction(reference_signature['principal_axis'])
             ref_centroid = np.array(reference_signature['centroid'])
             ref_position = np.array(reference_signature['primary_position'])
+
+            # PCA eigenvectors are sign-ambiguous. Align to reference to avoid endpoint flips.
+            if float(np.dot(current_principal_axis, ref_principal_axis)) < 0:
+                current_principal_axis = -current_principal_axis
             
             # Project reference position onto current shape's coordinate system
             # Find which end of the current principal axis corresponds to the reference
@@ -7304,23 +7556,23 @@ class MaskDrawingWidget(QWidget):
             
             # Create composite image (video with mask overlay)
             composite = self.video_frame.copy()
-            
-            # Create colored mask overlay
-            mask_colored = np.zeros_like(composite)
-            mask_colored[:, :, 2] = self.mask  # Red channel for mask
-            
-            # Blend with video - adjust opacity based on drawing state
-            # Only dim when drawing new shape on interpolated frame (not keyframes, not when merging)
-            current_frame = self.parent_editor.current_frame_index if self.parent_editor else 0
-            is_keyframe = current_frame in self.shape_keyframes
-            
-            if (self.is_drawing_new_shape and not is_keyframe):
-                # Dim interpolated shapes when drawing new shape on interpolated frame
-                alpha = 0.08  # Very dim for better video visibility during tracing
-            else:
-                # Normal opacity for keyframes or when not drawing new shapes
-                alpha = 0.3  # Reduced from 0.5 to make mask less intrusive
-            composite = cv2.addWeighted(composite, 1 - alpha, mask_colored, alpha, 0)
+            if self.show_mask_overlay:
+                # Create colored mask overlay
+                mask_colored = np.zeros_like(composite)
+                mask_colored[:, :, 2] = self.mask  # Red channel for mask
+                
+                # Blend with video - adjust opacity based on drawing state
+                # Only dim when drawing new shape on interpolated frame (not keyframes, not when merging)
+                current_frame = self.parent_editor.current_frame_index if self.parent_editor else 0
+                is_keyframe = current_frame in self.shape_keyframes
+                
+                if (self.is_drawing_new_shape and not is_keyframe):
+                    # Dim interpolated shapes when drawing new shape on interpolated frame
+                    alpha = 0.08  # Very dim for better video visibility during tracing
+                else:
+                    # Normal opacity for keyframes or when not drawing new shapes
+                    alpha = 0.3  # Reduced from 0.5 to make mask less intrusive
+                composite = cv2.addWeighted(composite, 1 - alpha, mask_colored, alpha, 0)
             
             # Convert to QImage and display
             height, width = composite.shape[:2]
@@ -7335,7 +7587,7 @@ class MaskDrawingWidget(QWidget):
             painter.drawPixmap(x, y, scaled_pixmap)
             
             # Draw shape painting preview (including shape eraser)
-            if self.is_drawing and self.drawing_mode == "shape" and hasattr(self, 'temp_shape_mask') and self.temp_shape_mask is not None:
+            if self.show_mask_overlay and self.is_drawing and self.drawing_mode == "shape" and hasattr(self, 'temp_shape_mask') and self.temp_shape_mask is not None:
                 # Check if this will merge with existing shapes
                 frame = self.parent_editor.current_frame_index if self.parent_editor else 0
                 will_merge = False
@@ -7390,7 +7642,7 @@ class MaskDrawingWidget(QWidget):
                     show_eraser_preview = True
                 # Shape eraser is now handled by the shape painting preview above
             
-            if show_eraser_preview:
+            if self.show_mask_overlay and show_eraser_preview:
                 # Scale brush size with zoom
                 brush_display_size = max(1, int(self.brush_size * self.zoom_level))
                 
@@ -7426,7 +7678,7 @@ class MaskDrawingWidget(QWidget):
                     painter.drawEllipse(QPoint(x, y), brush_display_size, brush_display_size)
             
             # Draw liquify lattice if enabled and in liquify mode
-            if self.drawing_mode == "liquify" and self.show_lattice and self.mask is not None:
+            if self.show_mask_overlay and self.drawing_mode == "liquify" and self.show_lattice and self.mask is not None:
                 # Draw deformation lattice
                 h, w = self.mask.shape[:2]
                 grid_size = self.liquify_grid_size
@@ -7499,7 +7751,7 @@ class MaskDrawingWidget(QWidget):
                         painter.drawLine(x1, y1, x2, y1)
             
             # Draw shape vertices if in shape mode
-            if self.drawing_mode == "shape":
+            if self.show_mask_overlay and self.drawing_mode == "shape":
                 frame = self.parent_editor.current_frame_index if self.parent_editor else 0
                 shapes = self.get_shapes_for_frame(frame)
                 
@@ -7633,7 +7885,7 @@ class MaskDrawingWidget(QWidget):
                                 painter.drawText(x + size + 2, y - size, str(vertex_idx))
             
             # Draw temporary interpolated shape indicator
-            if (hasattr(self, '_temp_interpolated_shapes') and 
+            if (self.show_mask_overlay and hasattr(self, '_temp_interpolated_shapes') and 
                 self.parent_editor and 
                 self.parent_editor.current_frame_index in self._temp_interpolated_shapes):
                 # Draw warning text in top-left corner
