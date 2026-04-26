@@ -1,0 +1,22 @@
+# Machine-Blocked Verification Handoff
+
+- Date: 2026-03-24
+- Source machine: `Porters-MacBook-Pro.local` (`Darwin arm64`)
+- Target machine: `Porter` (`Windows workstation`)
+- Repo/workspace: `/Volumes/T7/Dropbox/Codex/packages/comfyui-lostless-nodes`
+- Scope completed locally: prepared deferred-carry smoke handoff with explicit host mapping and first-run command for Windows ComfyUI execution.
+- Blocked step: execute `docs/MASK_EDITOR_DEFERRED_CARRY_SMOKE.md` end-path checks against a real ComfyUI UI session.
+- Blocker type: `machine-local`
+- Exact blocker output:
+  - `ls: /Applications/ComfyUI.app: No such file or directory`
+- Environment checks run:
+  - `hostname` -> `Porters-MacBook-Pro.local`
+  - `uname -a` -> `Darwin ... arm64`
+  - `ls /Applications/ComfyUI.app` -> `No such file or directory`
+  - `command -v python3` -> `/Users/porter/miniconda3/bin/python3`
+- First command to run on target machine:
+  - `pwsh -NoProfile -Command "Set-Location 'D:\Dropbox\Codex\packages\comfyui-lostless-nodes'; ./scripts/new_deferred_carry_smoke_result.sh"`
+- Expected success signal:
+  - A new artifact appears under `docs/evidence/deferred-carry/` and includes today's timestamp plus end-path result placeholders ready for pass/fail updates after UI checks.
+- Rollback note:
+  - Remove `docs/evidence/deferred-carry/machine-blocked-handoff-2026-03-24.md` if this handoff is superseded or incorrect.

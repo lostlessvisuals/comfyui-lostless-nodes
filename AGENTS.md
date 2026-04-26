@@ -9,12 +9,17 @@ Custom ComfyUI nodes focused on random image selection, sequence buffering, and 
 
 ## How To Work
 - Read `README.md`, `docs/LEARNINGS.md`, and the embedded `Lostless-Mask-Editor/README.md` when work touches the mask-editor surface.
+- When work changes deferred carry behavior in `Lostless-Mask-Editor/nodes/mask_editor.py`, also run `docs/MASK_EDITOR_DEFERRED_CARRY_SMOKE.md` before closeout.
+- Capture each deferred-carry smoke run using `docs/MASK_EDITOR_DEFERRED_CARRY_SMOKE_RESULT_TEMPLATE.md` so pass/fail evidence includes exact edited-file paths.
 - Keep package-local lessons in `docs/LEARNINGS.md`.
 - Record cross-project or ComfyUI-wide patterns in shared guidance instead of duplicating them here.
 - Inherit the package-workspace skill inventory from `/Volumes/T7/Dropbox/Codex/packages/AGENTS.md` unless this project explicitly needs a narrower set.
 
 ## Build / Run / Test
 - Python syntax smoke after touching Python modules: `python3 -m compileall .`
+- Deferred carry smoke after touching `mask_editor.py` carry/session logic: `docs/MASK_EDITOR_DEFERRED_CARRY_SMOKE.md`
+- Deferred carry evidence artifact template: `docs/MASK_EDITOR_DEFERRED_CARRY_SMOKE_RESULT_TEMPLATE.md`
+- Deferred carry evidence helper: `./scripts/new_deferred_carry_smoke_result.sh [output-path]`
 - Dependency refresh when embedded editor requirements change: `python3 -m pip install -r Lostless-Mask-Editor/requirements.txt`
 - Prefer a local ComfyUI startup smoke when node registration or import paths change.
 

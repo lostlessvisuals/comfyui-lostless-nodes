@@ -9,6 +9,7 @@ This package exposes these Lostless nodes:
 - `Lostless Random Image`
   - Picks an image from a folder and outputs `IMAGE` plus the selected filename (`STRING`).
   - Supports direct image picking in the node UI and preview restore when workflows reopen.
+  - Includes a `Broadcast Lock` toggle so shared randomize pulses can skip this node when you want to keep a favorite image fixed.
 - `Lostless Randomize Button`
   - Broadcast trigger for connected `Lostless Random Image` nodes.
   - Lets one button randomize every connected Lostless random-image node in the graph.
@@ -25,11 +26,14 @@ This package exposes these Lostless nodes:
 ## Recent Highlights
 
 - Random-image workflows now support manual image picking, preview restore, and connected-node randomization from the broadcast button node.
+- Random-image nodes can now be frozen from broadcast randomization using the per-node `Broadcast Lock` toggle.
 - The mask editor now includes reusable session memory, memory clearing from the node UI, improved frame-to-frame mask carry while painting, and a more compact toolbar layout.
 
 ## Validation Notes For Deferred Carry Changes
 
 - When editing deferred carry behavior in `Lostless-Mask-Editor/nodes/mask_editor.py`, run `docs/MASK_EDITOR_DEFERRED_CARRY_SMOKE.md` before closeout.
+- Generate a prefilled evidence artifact with `./scripts/new_deferred_carry_smoke_result.sh` (or pass an explicit output path).
+- Capture run evidence with `docs/MASK_EDITOR_DEFERRED_CARRY_SMOKE_RESULT_TEMPLATE.md` so pass/fail and edited-file paths are recorded in the same format.
 - Keep repo-local durable lessons in `docs/LEARNINGS.md`.
 
 ## Embedded Boundary

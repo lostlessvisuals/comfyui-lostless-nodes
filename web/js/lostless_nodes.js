@@ -323,6 +323,10 @@ async function randomizeImageNode(node) {
   markNodeDirty(node);
 }
 
+function isBroadcastRandomizeLocked(node) {
+  return !!getWidget(node, "lock_randomize")?.value;
+}
+
 async function randomizeConnectedNodes(buttonNode) {
   const graph = app.graph;
   if (!graph) {
@@ -342,6 +346,9 @@ async function randomizeConnectedNodes(buttonNode) {
 
       const targetNode = graph.getNodeById(link.target_id);
       if (targetNode && typeof targetNode.lostlessRandomize === "function") {
+        if (isBroadcastRandomizeLocked(targetNode)) {
+          continue;
+        }
         try {
           await targetNode.lostlessRandomize();
         } catch (error) {

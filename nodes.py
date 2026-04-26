@@ -132,13 +132,14 @@ def _resolve_selected_image_path(
 
 
 def _load_image_tensor(image_path: str) -> torch.Tensor:
-    image = Image.open(image_path)
-    image = ImageOps.exif_transpose(image)
-    if image.mode == "I":
-        image = image.point(lambda value: value * (1 / 255))
-    image = image.convert("RGB")
+    # Keep file handles short-lived under repeated random-image sampling.
+    with Image.open(image_path) as image:
+        image = ImageOps.exif_transpose(image)
+        if image.mode == "I":
+            image = image.point(lambda value: value * (1 / 255))
+        image = image.convert("RGB")
+        image_array = np.array(image).astype(np.float32) / 255.0
 
-    image_array = np.array(image).astype(np.float32) / 255.0
     return torch.from_numpy(image_array)[None,]
 
 
@@ -190,6 +191,14 @@ class LostlessRandomImage:
                         "placeholder": "Set by Randomize Image button",
                     },
                 ),
+                "lock_randomize": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "label_on": "Broadcast Lock: ON",
+                        "label_off": "Broadcast Lock: OFF",
+                    },
+                ),
                 "trigger": ("INT", {"default": 0}),
                 "selected_path": (
                     "STRING",
@@ -212,9 +221,11 @@ class LostlessRandomImage:
         recursive: bool,
         allowed_extensions: str,
         selected_filename: str,
+        lock_randomize: bool,
         trigger: int,
         selected_path: str,
     ):
+        del lock_randomize
         del trigger
 
         extensions = _normalize_extensions(allowed_extensions)
