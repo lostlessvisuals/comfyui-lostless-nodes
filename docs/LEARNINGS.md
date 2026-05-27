@@ -29,3 +29,8 @@ Entry template:
 - Context: Preparing the pack for Comfy Registry publication exposed that ComfyUI install and publish tooling expects clean root-level metadata even when runtime dependencies and broader code live inside an embedded subpackage.
 - Lesson: For this repo, the publish-facing source of truth lives at the root: `pyproject.toml`, `requirements.txt`, `LICENSE`, and `.comfyignore` must stay accurate even if the embedded `Lostless-Mask-Editor` structure evolves.
 - Action: When embedded dependencies, public node surface, or shipped assets change, update the root publish files in the same pass and re-check what the published archive will include.
+
+- Date: 2026-05-27
+- Context: The first Registry release accidentally described and shipped a temporary `Lostless VACE Strength Schedule` helper that was not intended to be part of the permanent public pack identity.
+- Lesson: This repo's release surface should stay intentionally small; `NODE_CLASS_MAPPINGS`, the README node list, and the root package description must agree on the exact public node count before each publish.
+- Action: Before future releases, compare `nodes.py` exports against the README and `pyproject.toml` description to confirm the pack still matches the intended five-node surface.

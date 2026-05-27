@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lostless-nodes"
-description = "Lostless custom nodes for random image selection, sequence buffering, mask editing, and VACE strength scheduling in ComfyUI."
-version = "0.2.0"
+description = "Lostless custom nodes for random image selection, sequence buffering, mask editing, and image-to-mask conversion in ComfyUI."
+version = "0.2.1"
 readme = "README.md"
 license = { file = "LICENSE" }
 dynamic = ["dependencies"]

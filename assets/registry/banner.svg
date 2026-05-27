@@ -16,6 +16,6 @@
   <path d="M264 690h306v-78H398V306h-134z" fill="#ffffff"/>
   <g fill="#f5f5f7">
     <text x="840" y="360" font-family="Avenir Next, Segoe UI, Helvetica, Arial, sans-serif" font-size="164" font-weight="700" letter-spacing="1">Lostless Nodes</text>
-    <text x="840" y="472" font-family="Avenir Next, Segoe UI, Helvetica, Arial, sans-serif" font-size="58" font-weight="500" opacity="0.74">Random image tools, buffering, mask editing, and VACE schedule helpers for ComfyUI</text>
+    <text x="840" y="472" font-family="Avenir Next, Segoe UI, Helvetica, Arial, sans-serif" font-size="58" font-weight="500" opacity="0.74">Random image tools, buffering, mask editing, and image-to-mask helpers for ComfyUI</text>
   </g>
 </svg>

@@ -1,6 +1,6 @@
 # Lostless Nodes
 
-Lostless custom nodes for ComfyUI focused on random image selection, sequence buffering, mask editing, and VACE strength scheduling.
+Lostless custom nodes for ComfyUI focused on random image selection, sequence buffering, mask editing, and image-to-mask conversion.
 
 ## Included Nodes
 
@@ -10,8 +10,6 @@ Lostless custom nodes for ComfyUI focused on random image selection, sequence bu
   Broadcast trigger for connected `Lostless Random Image` nodes so one button can randomize every unlocked Lostless random-image node in the graph.
 - `Lostless Buffer`
   Pads image sequences by duplicating the last frame to satisfy `LTX (8n+1)` or `WAN (4n+1)` batch requirements.
-- `Lostless VACE Strength Schedule`
-  Builds a repeated float schedule for VACE-style strength control from compact text input such as `0.90, 0.64#10, 0.80, 1.00, 0.64#2`.
 - `Lostless Mask Editor`
   Interactive mask editor for batched image and mask sequences with reusable in-memory sessions, clear-memory control, and frame-to-frame carry while painting.
 - `Lostless Image To Mask`
