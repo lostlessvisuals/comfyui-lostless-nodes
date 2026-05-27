@@ -8,7 +8,7 @@
 - Runtime entrypoints remain `__init__.py`, `nodes.py`, and `web/js/lostless_nodes.js`.
 - Root packaging now uses Comfy Registry metadata in `pyproject.toml`, root `requirements.txt`, root `LICENSE`, and `.comfyignore`.
 - Publish assets live under `assets/registry/`.
-- A GitHub publish workflow is expected under `.github/workflows/publish_action.yml`.
+- The GitHub publish workflow under `.github/workflows/publish_action.yml` now uses direct `comfy-cli` publishing with `actions/checkout@v6` and `actions/setup-python@v6`, rather than the `Comfy-Org/publish-node-action` wrapper.
 
 ## Decisions That Matter Right Now
 - Decision: the Comfy Registry-facing package id is `lostless-nodes`, while the Git repository and manual install folder remain `comfyui-lostless-nodes`.
@@ -16,14 +16,13 @@
 - Decision: internal docs, smoke evidence, and embedded upstream example workflows are kept in git for development continuity but excluded from the published archive via `.comfyignore`.
 
 ## Verification State
-- Passed: none yet in this handoff.
-- Still needed: `python3 -m compileall .`, `node --check web/js/lostless_nodes.js`, and a local ComfyUI startup smoke using the publish-prep tree.
+- Passed: `python3 -m compileall .`, browser-JS parse checks for `web/js/lostless_nodes.js` and `Lostless-Mask-Editor/web/js/wan_mask_editor.js`, `pyproject.toml` parse, registry asset validation, initial Registry publish of `lostless-nodes@0.2.0`, and YAML validation for `.github/workflows/publish_action.yml`.
+- Still needed: a local ComfyUI startup smoke using the publish-prep tree and a future publish of a bumped version to exercise the updated direct-publish workflow end to end.
 
 ## Next Steps
-1. Run syntax checks for Python and JS.
-2. Run a local ComfyUI startup smoke and one random-image broadcast-lock smoke.
-3. Create the `lostlessvisuals` publisher and API key on the Comfy Registry if it does not exist yet.
-4. Push the repo, then publish the new version through `comfy node publish` or the GitHub action after confirming assets resolve from `main`.
+1. Run a local ComfyUI startup smoke and one random-image broadcast-lock smoke.
+2. Bump `pyproject.toml` to the next semver when the next publishable change is ready.
+3. Use the direct GitHub Actions workflow or local `comfy node publish` path to publish the next version.
 
 ## Risks Or Blockers
 - The publish workflow still depends on the Registry publisher id being available as `lostlessvisuals`; change `PublisherId` in `pyproject.toml` if the actual Registry handle differs.
