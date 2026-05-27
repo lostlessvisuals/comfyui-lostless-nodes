@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2100 900" role="img" aria-labelledby="title desc">
+  <title id="title">Lostless Nodes banner</title>
+  <desc id="desc">Registry banner for Lostless Nodes featuring layered frames over a warm gradient.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#09090b"/>
+      <stop offset="40%" stop-color="#121216"/>
+      <stop offset="100%" stop-color="#1f1f25"/>
+    </linearGradient>
+  </defs>
+  <rect width="2100" height="900" fill="url(#bg)"/>
+  <circle cx="1710" cy="180" r="220" fill="#ffffff" opacity="0.08"/>
+  <circle cx="1950" cy="720" r="300" fill="#ffffff" opacity="0.05"/>
+  <rect x="220" y="168" width="404" height="404" rx="76" fill="none" stroke="#ffffff" stroke-width="40" opacity="0.96"/>
+  <rect x="314" y="262" width="404" height="404" rx="76" fill="none" stroke="#cfcfd5" stroke-width="40" opacity="0.88"/>
+  <path d="M264 690h306v-78H398V306h-134z" fill="#ffffff"/>
+  <g fill="#f5f5f7">
+    <text x="840" y="360" font-family="Avenir Next, Segoe UI, Helvetica, Arial, sans-serif" font-size="164" font-weight="700" letter-spacing="1">Lostless Nodes</text>
+    <text x="840" y="472" font-family="Avenir Next, Segoe UI, Helvetica, Arial, sans-serif" font-size="58" font-weight="500" opacity="0.74">Random image tools, buffering, mask editing, and VACE schedule helpers for ComfyUI</text>
+  </g>
+</svg>

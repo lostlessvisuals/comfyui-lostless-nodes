@@ -1,65 +1,43 @@
-﻿# ComfyUI Lostless Nodes
+# Lostless Nodes
 
-Lostless custom nodes for ComfyUI focused on random image selection, sequence buffering, and mask editing.
+Lostless custom nodes for ComfyUI focused on random image selection, sequence buffering, mask editing, and VACE strength scheduling.
 
 ## Included Nodes
 
-This package exposes these Lostless nodes:
-
 - `Lostless Random Image`
-  - Picks an image from a folder and outputs `IMAGE` plus the selected filename (`STRING`).
-  - Supports direct image picking in the node UI and preview restore when workflows reopen.
-  - Includes a `Broadcast Lock` toggle so shared randomize pulses can skip this node when you want to keep a favorite image fixed.
+  Picks an image from a folder and outputs `IMAGE` plus the selected filename. Supports direct image picking, preview restore on reopen, and a per-node `Broadcast Lock` toggle for shared randomize pulses.
 - `Lostless Randomize Button`
-  - Broadcast trigger for connected `Lostless Random Image` nodes.
-  - Lets one button randomize every connected Lostless random-image node in the graph.
+  Broadcast trigger for connected `Lostless Random Image` nodes so one button can randomize every unlocked Lostless random-image node in the graph.
 - `Lostless Buffer`
-  - Pads image sequences by duplicating the last frame to satisfy `LTX (8n+1)` or `WAN (4n+1)`.
+  Pads image sequences by duplicating the last frame to satisfy `LTX (8n+1)` or `WAN (4n+1)` batch requirements.
+- `Lostless VACE Strength Schedule`
+  Builds a repeated float schedule for VACE-style strength control from compact text input such as `0.90, 0.64#10, 0.80, 1.00, 0.64#2`.
 - `Lostless Mask Editor`
-  - Interactive mask editor for batched image and mask sequences.
-  - Supports reusable in-memory sessions, clear-memory control, and brush/shape carry while moving through frames.
-  - Exposes `masks` plus a black/white `mask_image` preview.
+  Interactive mask editor for batched image and mask sequences with reusable in-memory sessions, clear-memory control, and frame-to-frame carry while painting.
 - `Lostless Image To Mask`
-  - Converts black/white or RGB images into `MASK` plus a mask preview `IMAGE`.
-  - Supports grayscale-preserving conversion as well as thresholded conversion.
-
-## Recent Highlights
-
-- Random-image workflows now support manual image picking, preview restore, and connected-node randomization from the broadcast button node.
-- Random-image nodes can now be frozen from broadcast randomization using the per-node `Broadcast Lock` toggle.
-- The mask editor now includes reusable session memory, memory clearing from the node UI, improved frame-to-frame mask carry while painting, and a more compact toolbar layout.
-
-## Validation Notes For Deferred Carry Changes
-
-- When editing deferred carry behavior in `Lostless-Mask-Editor/nodes/mask_editor.py`, run `docs/MASK_EDITOR_DEFERRED_CARRY_SMOKE.md` before closeout.
-- Generate a prefilled evidence artifact with `./scripts/new_deferred_carry_smoke_result.sh` (or pass an explicit output path).
-- Capture run evidence with `docs/MASK_EDITOR_DEFERRED_CARRY_SMOKE_RESULT_TEMPLATE.md` so pass/fail and edited-file paths are recorded in the same format.
-- Keep repo-local durable lessons in `docs/LEARNINGS.md`.
-
-## Embedded Boundary
-
-- The embedded `Lostless-Mask-Editor` folder still contains broader upstream/editor code for compatibility.
-- This package intentionally exposes only the focused Lostless surface:
-  - random image selection
-  - sequence buffering
-  - `Lostless Mask Editor`
-  - `Lostless Image To Mask`
+  Converts black-and-white or RGB images into `MASK` plus a preview `IMAGE`, with grayscale-preserving and thresholded conversion modes.
 
 ## Installation
 
-1. Place this repository in your ComfyUI custom nodes folder:
-   - `ComfyUI/custom_nodes/comfyui-lostless-nodes`
-2. Install the embedded package requirements using your ComfyUI Python environment:
+### Manual install
 
-```powershell
-# Example: ComfyUI venv install
-C:\Users\porte\Documents\ComfyUI\.venv\Scripts\python.exe -m pip install -r C:\Users\porte\Documents\ComfyUI\custom_nodes\comfyui-lostless-nodes\Lostless-Mask-Editor\requirements.txt
+1. Clone this repository into `ComfyUI/custom_nodes/comfyui-lostless-nodes`.
+2. Install the node-pack dependencies using the same Python environment that runs ComfyUI.
+3. Restart ComfyUI.
+
+```bash
+python -m pip install -r ComfyUI/custom_nodes/comfyui-lostless-nodes/requirements.txt
 ```
 
-3. Restart ComfyUI.
+### ComfyUI-Manager / Registry
+
+Once this pack is published to the Comfy Registry, install it through ComfyUI-Manager by searching for `Lostless Nodes`.
+
+## Notes
+
+- The repo contains an embedded `Lostless-Mask-Editor` package for compatibility, but this node pack intentionally exposes only the focused Lostless surface documented above.
+- If you modify deferred-carry behavior in `Lostless-Mask-Editor/nodes/mask_editor.py`, run `docs/MASK_EDITOR_DEFERRED_CARRY_SMOKE.md` before shipping changes.
 
 ## License
 
-- `comfyui-lostless-nodes` is licensed under Apache License 2.0.
-- The current license text lives at `Lostless-Mask-Editor/LICENSE` and applies to the full Lostless node pack, not only the embedded mask editor folder.
-- Review any embedded upstream notices if you redistribute modified versions.
+This repository is licensed under Apache License 2.0. Embedded upstream-derived files retain their own notices where applicable.

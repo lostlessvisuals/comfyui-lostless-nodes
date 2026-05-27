@@ -155,6 +155,65 @@ def _ensure_image_batch(images: torch.Tensor) -> torch.Tensor:
     return images
 
 
+def _parse_repeated_float_schedule(schedule: str) -> List[float]:
+    import re
+
+    result: List[float] = []
+    items = [x.strip() for x in str(schedule).split(",") if x.strip()]
+    repeat_pattern = r"^(-?\d+(?:\.\d+)?)#(\d+)$"
+
+    for item in items:
+        match = re.match(repeat_pattern, item)
+        if match:
+            number = float(match.group(1))
+            count = int(match.group(2))
+            result.extend([number] * count)
+        else:
+            result.append(float(item))
+
+    if not result:
+        raise ValueError("Schedule must contain at least one numeric value.")
+
+    return result
+
+
+def _resize_vace_strength_schedule(values: List[float], target_length: int, tail_anchor_count: int) -> List[float]:
+    if target_length < 1:
+        raise ValueError(f"Target schedule length must be at least 1, got {target_length}")
+
+    values = [float(v) for v in values]
+    if len(values) == target_length:
+        return values
+    if len(values) == 1:
+        return [values[0]] * target_length
+
+    effective_tail_count = min(max(tail_anchor_count, 0), max(len(values) - 1, 0))
+    head = [values[0]]
+    tail = values[-effective_tail_count:] if effective_tail_count > 0 else []
+    middle_value = values[1]
+    fixed_count = len(head) + len(tail)
+
+    if target_length >= fixed_count:
+        middle_count = target_length - fixed_count
+        return head + [middle_value] * middle_count + tail
+
+    peak_value = max(tail) if tail else max(values)
+    if target_length == 1:
+        return [peak_value]
+    if target_length == 2:
+        return [head[0], peak_value]
+    if target_length == 3:
+        pre_peak = tail[0] if tail else middle_value
+        return [head[0], pre_peak, peak_value]
+    if target_length == 4:
+        pre_peak = tail[0] if tail else middle_value
+        post_peak = tail[-1] if tail else middle_value
+        return [head[0], pre_peak, peak_value, post_peak]
+
+    keep_from_tail = max(0, target_length - 1)
+    return head + tail[:keep_from_tail]
+
+
 class LostlessRandomImage:
     @classmethod
     def INPUT_TYPES(cls):
@@ -299,6 +358,44 @@ class LostlessBufferNode:
         last_frame = images[-1:].repeat(pad_count, 1, 1, 1)
         buffered = torch.cat([images, last_frame], dim=0)
         return (buffered.contiguous(),)
+
+
+class LostlessVaceStrengthSchedule:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "schedule": (
+                    "STRING",
+                    {
+                        "default": "0.90, 0.64#10, 0.80, 1.00, 0.64#2",
+                        "multiline": False,
+                    },
+                ),
+                "length": ("INT", {"default": 57, "min": 1, "max": 4096, "step": 1}),
+            },
+            "optional": {
+                "frames_per_value": ("INT", {"default": 4, "min": 1, "max": 64, "step": 1}),
+                "tail_anchor_count": ("INT", {"default": 4, "min": 0, "max": 64, "step": 1}),
+            },
+        }
+
+    RETURN_TYPES = ("FLOAT",)
+    RETURN_NAMES = ("vace_strength",)
+    FUNCTION = "build"
+    CATEGORY = "lostless/nodes"
+
+    def build(
+        self,
+        schedule: str,
+        length: int,
+        frames_per_value: int = 4,
+        tail_anchor_count: int = 4,
+    ):
+        values = _parse_repeated_float_schedule(schedule)
+        latent_length = ((max(1, int(length)) - 1) // max(1, int(frames_per_value))) + 1
+        resized = _resize_vace_strength_schedule(values, latent_length, int(tail_anchor_count))
+        return (resized,)
 
 def _register_routes() -> None:
     routes = PromptServer.instance.routes
@@ -468,12 +565,14 @@ NODE_CLASS_MAPPINGS = {
     "LostlessRandomImage": LostlessRandomImage,
     "LostlessRandomizeButton": LostlessRandomizeButton,
     "LostlessBufferNode": LostlessBufferNode,
+    "LostlessVaceStrengthSchedule": LostlessVaceStrengthSchedule,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LostlessRandomImage": "Lostless Random Image",
     "LostlessRandomizeButton": "Lostless Randomize Button",
     "LostlessBufferNode": "Lostless Buffer",
+    "LostlessVaceStrengthSchedule": "Lostless VACE Strength Schedule",
 }
 
 _EMBEDDED_CLASS_MAPPINGS, _EMBEDDED_DISPLAY_MAPPINGS = _load_embedded_lostless_mappings()

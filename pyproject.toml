@@ -1,13 +1,28 @@
-﻿[project]
-name = "comfyui-lostless-nodes"
-description = "Pre-run random image selector and broadcast randomize button nodes for ComfyUI"
-version = "0.1.0"
-license = "MIT"
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lostless-nodes"
+description = "Lostless custom nodes for random image selection, sequence buffering, mask editing, and VACE strength scheduling in ComfyUI."
+version = "0.2.0"
+readme = "README.md"
+license = { file = "LICENSE" }
+dynamic = ["dependencies"]
+classifiers = [
+    "Operating System :: OS Independent",
+]
 
 [project.urls]
-Repository = "https://example.com/comfyui-lostless-nodes"
+Repository = "https://github.com/lostlessvisuals/comfyui-lostless-nodes"
+Documentation = "https://github.com/lostlessvisuals/comfyui-lostless-nodes#readme"
+"Bug Tracker" = "https://github.com/lostlessvisuals/comfyui-lostless-nodes/issues"
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
 
 [tool.comfy]
-PublisherId = "lostless"
-DisplayName = "ComfyUI Lostless Nodes"
-Icon = ""
+PublisherId = "lostlessvisuals"
+DisplayName = "Lostless Nodes"
+Icon = "https://raw.githubusercontent.com/lostlessvisuals/comfyui-lostless-nodes/main/assets/registry/icon.png"
+Banner = "https://raw.githubusercontent.com/lostlessvisuals/comfyui-lostless-nodes/main/assets/registry/banner.svg"

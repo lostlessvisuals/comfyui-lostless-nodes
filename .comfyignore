@@ -1,0 +1,7 @@
+.github/
+AGENTS.md
+docs/
+scripts/
+.gitignore
+
+Lostless-Mask-Editor/workflows/

@@ -1,0 +1,6 @@
+# Root install surface for ComfyUI Manager / Registry publication.
+# Keep this file aligned with Lostless-Mask-Editor/requirements.txt.
+opencv-python>=4.5.0
+numpy>=1.19.0
+PyQt5>=5.15.0
+psutil>=5.8.0

@@ -9,6 +9,13 @@ const RANDOM_PRIMARY_BUTTON_MIN_WIDTH = 220;
 const RANDOM_SECONDARY_BUTTON_HEIGHT = 34;
 const RANDOM_IMAGE_NODE_MIN_WIDTH = 260;
 const RANDOMIZE_BUTTON_NODE_MIN_WIDTH = 240;
+const LOSTLESS_MASK_EDITOR_THEME = {
+  title: "#18181c",
+  body: "#0d0d10",
+  accent: "#f3f3f5",
+  muted: "#8e8e97",
+  minWidth: 320,
+};
 
 function getWidget(node, name) {
   return (node.widgets || []).find((widget) => widget.name === name);
@@ -68,6 +75,17 @@ function fitNodeToWidgets(node, minWidth = 0) {
     Math.max(currentHeight, nextSize[1] || 0),
   ]);
   markNodeDirty(node);
+}
+
+function applyLostlessMaskEditorTheme(node) {
+  if (!node) {
+    return;
+  }
+
+  node.color = LOSTLESS_MASK_EDITOR_THEME.title;
+  node.bgcolor = LOSTLESS_MASK_EDITOR_THEME.body;
+  node.boxcolor = LOSTLESS_MASK_EDITOR_THEME.accent;
+  fitNodeToWidgets(node, LOSTLESS_MASK_EDITOR_THEME.minWidth);
 }
 
 function isLegacyProjectDataName(name) {
@@ -1360,10 +1378,12 @@ app.registerExtension({
       nodeType.prototype.onNodeCreated = function () {
         const result = onNodeCreated?.apply(this, arguments);
         if (this.__lostless_mask_editor_memory_ready) {
+          applyLostlessMaskEditorTheme(this);
           return result;
         }
         this.__lostless_mask_editor_memory_ready = true;
         removeLegacyProjectDataSlots(this);
+        applyLostlessMaskEditorTheme(this);
 
         const reuseWidget = getWidget(this, "reuse_last_edit");
         const originalCallback = reuseWidget?.callback;
@@ -1404,6 +1424,7 @@ app.registerExtension({
         );
         statusWidget.disabled = true;
         makeReadOnly(statusWidget);
+        setWidgetMinimumSize(statusWidget, { minWidth: 210 });
 
         setTimeout(() => {
           refreshMaskEditorMemoryStatus(this);
@@ -1415,6 +1436,7 @@ app.registerExtension({
       nodeType.prototype.onConfigure = function () {
         const result = onConfigure?.apply(this, arguments);
         removeLegacyProjectDataSlots(this);
+        applyLostlessMaskEditorTheme(this);
         setTimeout(() => {
           refreshMaskEditorMemoryStatus(this);
         }, 0);
@@ -1423,6 +1445,7 @@ app.registerExtension({
 
       nodeType.prototype.onExecuted = function (message) {
         const result = onExecuted?.apply(this, arguments);
+        applyLostlessMaskEditorTheme(this);
         const status = Array.isArray(message?.memory_status) ? message.memory_status[0] : null;
         const statusWidget = this.widgets?.find((widget) => widget.name === "memory_status");
         if (statusWidget && typeof status === "string" && status.trim()) {

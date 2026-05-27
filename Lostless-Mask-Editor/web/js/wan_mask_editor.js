@@ -3,6 +3,17 @@ import { api } from "../../../../scripts/api.js";
 
 console.log("[Mask Editor] JavaScript loading...");
 
+const LOSTLESS_MASK_EDITOR_MODAL_THEME = {
+    overlay: "rgba(0, 0, 0, 0.62)",
+    panel: "#101013",
+    panelBorder: "#303038",
+    text: "#f4f4f6",
+    subtext: "#b8b8bf",
+    spinnerTrack: "#4a4a51",
+    spinnerHead: "#ffffff",
+    shadow: "0 18px 60px rgba(0, 0, 0, 0.55)",
+};
+
 // Helper functions for modal spinner
 function showMaskEditorSpinner(message) {
     if (document.getElementById('mask-editor-modal')) return;
@@ -13,16 +24,16 @@ function showMaskEditorSpinner(message) {
     modal.style.left = '0';
     modal.style.width = '100vw';
     modal.style.height = '100vh';
-    modal.style.background = 'rgba(0,0,0,0.4)';
+    modal.style.background = LOSTLESS_MASK_EDITOR_MODAL_THEME.overlay;
     modal.style.display = 'flex';
     modal.style.alignItems = 'center';
     modal.style.justifyContent = 'center';
     modal.style.zIndex = '9999';
     modal.innerHTML = `
-      <div style="background: #222; color: #fff; padding: 32px 48px; border-radius: 12px; box-shadow: 0 2px 16px #0008; display: flex; flex-direction: column; align-items: center;">
-        <div class="mask-editor-spinner" style="margin-bottom: 18px; width: 48px; height: 48px; border: 6px solid #888; border-top: 6px solid #fff; border-radius: 50%; animation: mask-spin 1s linear infinite;"></div>
+      <div style="background: ${LOSTLESS_MASK_EDITOR_MODAL_THEME.panel}; color: ${LOSTLESS_MASK_EDITOR_MODAL_THEME.text}; border: 1px solid ${LOSTLESS_MASK_EDITOR_MODAL_THEME.panelBorder}; padding: 32px 48px; border-radius: 18px; box-shadow: ${LOSTLESS_MASK_EDITOR_MODAL_THEME.shadow}; display: flex; flex-direction: column; align-items: center;">
+        <div class="mask-editor-spinner" style="margin-bottom: 18px; width: 48px; height: 48px; border: 6px solid ${LOSTLESS_MASK_EDITOR_MODAL_THEME.spinnerTrack}; border-top: 6px solid ${LOSTLESS_MASK_EDITOR_MODAL_THEME.spinnerHead}; border-radius: 50%; animation: mask-spin 1s linear infinite;"></div>
         <div style="font-size: 1.2em; margin-bottom: 6px;">${message}</div>
-        <div style="font-size: 0.95em; color: #ccc;">This may take a while for large videos or image sequences.</div>
+        <div style="font-size: 0.95em; color: ${LOSTLESS_MASK_EDITOR_MODAL_THEME.subtext};">This may take a while for large videos or image sequences.</div>
       </div>
       <style>
         @keyframes mask-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
