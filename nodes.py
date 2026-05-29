@@ -172,8 +172,8 @@ class LostlessRandomImage:
                     "BOOLEAN",
                     {
                         "default": True,
-                        "label_on": "Scan Subfolders: ON",
-                        "label_off": "Scan Subfolders: OFF",
+                        "label_on": "ON",
+                        "label_off": "OFF",
                     },
                 ),
                 "allowed_extensions": (
@@ -195,8 +195,8 @@ class LostlessRandomImage:
                     "BOOLEAN",
                     {
                         "default": False,
-                        "label_on": "Broadcast Lock: ON",
-                        "label_off": "Broadcast Lock: OFF",
+                        "label_on": "ON",
+                        "label_off": "OFF",
                     },
                 ),
                 "trigger": ("INT", {"default": 0}),

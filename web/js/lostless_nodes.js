@@ -7,7 +7,8 @@ const MASK_EDITOR_NODE = "MaskEditor";
 const RANDOM_PRIMARY_BUTTON_HEIGHT = 40;
 const RANDOM_PRIMARY_BUTTON_MIN_WIDTH = 220;
 const RANDOM_SECONDARY_BUTTON_HEIGHT = 34;
-const RANDOM_IMAGE_NODE_MIN_WIDTH = 260;
+const RANDOM_IMAGE_NODE_MIN_WIDTH = 320;
+const RANDOM_IMAGE_TOGGLE_MIN_WIDTH = 280;
 const RANDOMIZE_BUTTON_NODE_MIN_WIDTH = 240;
 const LOSTLESS_MASK_EDITOR_THEME = {
   title: "#18181c",
@@ -35,27 +36,59 @@ function setWidgetMinimumSize(widget, { minWidth = 0, minHeight = 0 } = {}) {
     return widget;
   }
 
-  const originalComputeSize =
-    typeof widget.computeSize === "function" ? widget.computeSize.bind(widget) : null;
+  if (!("__lostlessOriginalComputeSize" in widget)) {
+    widget.__lostlessOriginalComputeSize =
+      typeof widget.computeSize === "function" ? widget.computeSize.bind(widget) : null;
+  }
+
+  widget.__lostlessMinWidth = Math.max(widget.__lostlessMinWidth || 0, minWidth);
+  widget.__lostlessMinHeight = Math.max(widget.__lostlessMinHeight || 0, minHeight);
 
   widget.computeSize = (width) => {
-    const fallbackWidth = Number.isFinite(width) ? width : minWidth;
-    const base = originalComputeSize?.(width);
+    const fallbackWidth = Number.isFinite(width) ? width : widget.__lostlessMinWidth;
+    const base = widget.__lostlessOriginalComputeSize?.(width);
     const baseWidth =
       Array.isArray(base) && Number.isFinite(base[0]) ? base[0] : fallbackWidth;
     const baseHeight =
       Array.isArray(base) && Number.isFinite(base[1]) ? base[1] : getDefaultWidgetHeight();
 
-    return [Math.max(baseWidth, minWidth), Math.max(baseHeight, minHeight)];
+    return [
+      Math.max(baseWidth, widget.__lostlessMinWidth),
+      Math.max(baseHeight, widget.__lostlessMinHeight),
+    ];
   };
 
   widget.options = {
     ...(widget.options || {}),
-    minWidth: Math.max(Number(widget.options?.minWidth) || 0, minWidth),
-    minHeight: Math.max(Number(widget.options?.minHeight) || 0, minHeight),
+    minWidth: Math.max(Number(widget.options?.minWidth) || 0, widget.__lostlessMinWidth),
+    minHeight: Math.max(Number(widget.options?.minHeight) || 0, widget.__lostlessMinHeight),
   };
 
   return widget;
+}
+
+function configureCompactToggleWidget(
+  widget,
+  { label = "", onLabel = "ON", offLabel = "OFF", minWidth = 0 } = {}
+) {
+  if (!widget) {
+    return widget;
+  }
+
+  widget.options = {
+    ...(widget.options || {}),
+    on: onLabel,
+    off: offLabel,
+    label_on: onLabel,
+    label_off: offLabel,
+  };
+
+  if (label) {
+    widget.label = label;
+    widget.options.label = label;
+  }
+
+  return setWidgetMinimumSize(widget, { minWidth });
 }
 
 function fitNodeToWidgets(node, minWidth = 0) {
@@ -343,6 +376,18 @@ async function randomizeImageNode(node) {
 
 function isBroadcastRandomizeLocked(node) {
   return !!getWidget(node, "lock_randomize")?.value;
+}
+
+function applyRandomImageWidgetLayout(node) {
+  // Keep the toggle rows readable even when LiteGraph renders the field name on the left.
+  configureCompactToggleWidget(getWidget(node, "recursive"), {
+    label: "Subfolders",
+    minWidth: RANDOM_IMAGE_TOGGLE_MIN_WIDTH,
+  });
+  configureCompactToggleWidget(getWidget(node, "lock_randomize"), {
+    label: "Broadcast Lock",
+    minWidth: RANDOM_IMAGE_TOGGLE_MIN_WIDTH,
+  });
 }
 
 async function randomizeConnectedNodes(buttonNode) {
@@ -1222,6 +1267,7 @@ app.registerExtension({
 
         makeReadOnly(getWidget(this, "selected_filename"));
         hideWidget(getWidget(this, "selected_path"));
+        applyRandomImageWidgetLayout(this);
 
         this.lostlessRandomize = async () => {
           await randomizeImageNode(this);
@@ -1291,6 +1337,7 @@ app.registerExtension({
       nodeType.prototype.onConfigure = function () {
         const result = onConfigure?.apply(this, arguments);
         setTimeout(() => {
+          applyRandomImageWidgetLayout(this);
           fitNodeToWidgets(this, RANDOM_IMAGE_NODE_MIN_WIDTH);
           this.lostlessRestorePreview?.();
         }, 0);
