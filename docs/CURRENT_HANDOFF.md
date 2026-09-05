@@ -1,7 +1,7 @@
 # Current Handoff
 
 ## Active Objective
-- Review and harden mask point rendering, editing, and session restore. The user authorized follow-up improvements and a GitHub push. Combined fixes are ready to push; live ComfyUI validation remains a documented caveat.
+- Review and harden mask point rendering, editing, and session restore. Mask hardening is committed and pushed to `main` in `2551881`. Live ComfyUI validation remains a documented caveat; the prepared CI workflow remains local due to GitHub token scope.
 
 ## Current Repo Reality
 - Branch: `main`.
@@ -22,7 +22,7 @@
 - Full findings and remaining raster-fidelity limitations: `docs/MASK_EDITOR_REVIEW_2026-09-04.md`.
 - The four-path live ComfyUI smoke remains pending on Windows; automated Qt carry subcases pass. Evidence: `docs/evidence/deferred-carry/deferred-carry-smoke-2026-09-04-mask-review.md`.
 - Follow-up: imported pixel masks now remain intact until explicit, confirmed, undoable Create Points conversion. Autosave retains pixel-mask data. Reuse Last Edit retains original editable points/settings alongside pixels. Windows/Linux regression CI is prepared locally; the configured GitHub token lacks workflow scope, so its file is excluded from the code push.
-- GitHub push is authorized; no version bump or Registry publication is included.
+- Confirmed: `2551881` pushed to GitHub `main`. No version bump or Registry publication was included.
 
 ## Verification State
 - Passed: `python3 -m compileall .`, browser-JS parse checks for `web/js/lostless_nodes.js` and `Lostless-Mask-Editor/web/js/wan_mask_editor.js`, registry asset validation, initial Registry publish of `lostless-nodes@0.2.0`, YAML validation for `.github/workflows/publish_action.yml`, and removal of the accidental `Lostless VACE Strength Schedule` node from code plus publish-facing copy.
