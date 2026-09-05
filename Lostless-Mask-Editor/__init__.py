@@ -6,6 +6,7 @@ Video frame processing nodes for AI interpolation workflows
 import os
 import sys
 import time
+import copy
 
 # Print debug info about which file is being loaded
 current_file = os.path.abspath(__file__)
@@ -188,7 +189,7 @@ class MaskEditor:
         tensor = torch.from_numpy(cached_masks.astype("float32") / 255.0)
         return tensor, "Memory: reused last edit"
 
-    def _store_cached_masks(self, unique_id, masks):
+    def _store_cached_masks(self, unique_id, masks, editor_state=None):
         key = _normalize_memory_key(unique_id)
         if key is None:
             return
@@ -200,6 +201,13 @@ class MaskEditor:
             "masks": masks_u8,
             "shape": tuple(int(v) for v in masks_u8.shape),
             "updated_at": time.time(),
+            # Keep editable geometry with its raster result. Source images and
+            # paths always come from the current input batch on the next run.
+            "editor_state": copy.deepcopy({
+                name: editor_state[name]
+                for name in ("shape_keyframes", "settings", "current_frame")
+                if isinstance(editor_state, dict) and name in editor_state
+            }),
         }
 
     def _normalize_images(self, images):
@@ -362,12 +370,15 @@ class MaskEditor:
             "shape_keyframes": shape_keyframes_payload,
             "mask_frames": mask_frames_payload,
             "settings": {
-                "drawing_mode": "brush",
+                "drawing_mode": "shape",
                 "brush_size": 20,
                 "vertex_count": 150,
             },
             "current_frame": 0,
         }
+        if cached_masks is not None:
+            entry = get_mask_editor_memory_cache().get(_normalize_memory_key(unique_id), {})
+            project_data.update(copy.deepcopy(entry.get("editor_state", {})))
 
         # Always bind the project to the current input image batch so old source paths
         # do not override the node's current frame sequence.
@@ -445,7 +456,12 @@ class MaskEditor:
             )
 
         edited_masks_tensor = torch.from_numpy(edited_masks.astype(np.float32) / 255.0)
-        self._store_cached_masks(unique_id, edited_masks_tensor)
+        project_path = os.path.join(output_dir, "project_data.json")
+        editor_state = None
+        if os.path.isfile(project_path):
+            with open(project_path, "r", encoding="utf-8") as f:
+                editor_state = json.load(f)
+        self._store_cached_masks(unique_id, edited_masks_tensor, editor_state=editor_state)
         if reuse_last_edit:
             memory_status = "Memory: saved last edit"
         elif cached_masks is not None:

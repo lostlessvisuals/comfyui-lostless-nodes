@@ -33,8 +33,15 @@ Once this pack is published to the Comfy Registry, install it through ComfyUI-Ma
 
 ## Notes
 
+- New blank-mask edits start in Shape mode, which creates editable outline points. Drag a point to move it; use `Ctrl+Z` / `Ctrl+Shift+Z` to undo/redo. `Shift+B` switches between Shape and Pixel brushes; the toolbar shows the current mode. Pixel strokes do not create outline points. Use **Show Mask** if the overlay and points are hidden.
+- Imported pixel masks open in Pixel mode and retain their grayscale, holes, and small details. Click **Create Points** to convert the sequence to editable outlines. Conversion is approximate and requires confirmation; undo restores the original pixels. Switching a pixel mask to Shape or Liquify mode offers the same conversion rather than changing it silently.
+- **Reuse Last Edit** preserves editable points and tool settings together with the saved mask pixels. **Clear Memory** clears both.
 - The repo contains an embedded `Lostless-Mask-Editor` package for compatibility, but this node pack intentionally exposes only the focused Lostless surface documented above.
 - If you modify deferred-carry behavior in `Lostless-Mask-Editor/nodes/mask_editor.py`, run `docs/MASK_EDITOR_DEFERRED_CARRY_SMOKE.md` before shipping changes.
+
+## Development checks
+
+Install the root requirements and PyTorch (already supplied by ComfyUI) in a disposable Python environment, then run `python -m unittest discover -s tests -v`. The tests use real Qt widgets with an offscreen display, exercise point rendering and dragging, restore a project through the launcher, and verify exported masks. Repeat with `QT_SCALE_FACTOR=2` for high-DPI coverage. A live ComfyUI smoke on the target operating system is still required before release.
 
 ## License
 

@@ -34,3 +34,8 @@ Entry template:
 - Context: The first Registry release accidentally described and shipped a temporary `Lostless VACE Strength Schedule` helper that was not intended to be part of the permanent public pack identity.
 - Lesson: This repo's release surface should stay intentionally small; `NODE_CLASS_MAPPINGS`, the README node list, and the root package description must agree on the exact public node count before each publish.
 - Action: Before future releases, compare `nodes.py` exports against the README and `pyproject.toml` description to confirm the pack still matches the intended five-node surface.
+
+- Date: 2026-09-04
+- Context: Mask point review reproduced a debug-render exception, stale point caches, after-edit undo snapshots, and startup/restore mode drift.
+- Lesson: Verify point visibility with a real Qt paint plus mouse events; syntax checks cannot catch missing names inside paintEvent. Restore must set the delayed startup mode as well as the visible widget, and point mutations must invalidate geometry caches.
+- Action: Run `python -m unittest discover -s tests -v` and its 2× Qt-scale variant for mask-editor changes. Keep explicit empty keyframes and do not regenerate an existing vector timeline from its raster export. Contour conversion is approximate; restore must preserve pixel data and offer explicit, undoable Create Points conversion. Pixel-mask autosaves must encode raster data because there may be no vector keyframes to recover from. Reuse Last Edit must cache geometry/settings with pixels while rebinding source images to the current input batch.

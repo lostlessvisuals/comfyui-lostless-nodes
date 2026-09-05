@@ -16,13 +16,13 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QMenu, QAction, QComboBox, QCheckBox, QScrollArea, QDialog,
                              QGridLayout, QFrame, QSizePolicy, QBoxLayout)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSettings, QRect, QRectF, QTimer, QPoint, QPropertyAnimation, QEasingCurve, pyqtProperty
-from PyQt5.QtGui import QFont, QPainter, QColor, QPen, QBrush, QPixmap, QImage, QLinearGradient, QRadialGradient, QPainterPath, QCursor, QIcon
+from PyQt5.QtGui import QFont, QPainter, QColor, QPen, QBrush, QPixmap, QImage, QLinearGradient, QRadialGradient, QPainterPath, QCursor, QIcon, QPolygon
 import cv2
 import numpy as np
 from collections import deque, OrderedDict
 import time
 
-MASK_EDITOR_BUILD_TAG = "r2026.02.20.3"
+MASK_EDITOR_BUILD_TAG = "r2026.09.04.1"
 
 def natural_sort_key(text):
     """Generate a key for natural sorting that handles numbers in filenames correctly"""
@@ -517,7 +517,7 @@ class InpaintingMaskEditor(QDialog):
         if initial_mode:
             self.initial_mode = initial_mode
         else:
-            self.initial_mode = self.settings.value('mask_editor_mode', 'brush')
+            self.initial_mode = self.settings.value('mask_editor_mode', 'shape')
         
         # Drawing properties
         self.drawing_mode = None  # "brush", "shape", "eraser" - will be set later
@@ -900,8 +900,15 @@ class InpaintingMaskEditor(QDialog):
         self.mode_indicator = QLabel("PIXEL")
         self.mode_indicator.setAlignment(Qt.AlignCenter)
         self.mode_indicator.setStyleSheet(mode_label_style)
-        self.mode_indicator.setVisible(False)
-        tools_layout.addWidget(self.mode_indicator)
+        self.mode_indicator.setToolTip("Shape mode creates editable outline points. Pixel mode paints pixels. Shift+B switches modes.")
+        self.mode_indicator.setVisible(True)
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(self.mode_indicator, 0, Qt.AlignLeft)
+        self.create_points_btn = QPushButton("Create Points")
+        self.create_points_btn.setToolTip("Convert the mask sequence to editable outlines. Conversion approximates edges, fills holes, and removes grayscale; it can be undone.")
+        self.create_points_btn.clicked.connect(self.create_points_from_masks)
+        mode_row.addWidget(self.create_points_btn)
+        toolbar_controls_layout.insertLayout(1, mode_row)
         
         # Warp button removed - was displaying as "./ar" due to font issue
         
@@ -1447,6 +1454,16 @@ class InpaintingMaskEditor(QDialog):
             # Default to shape brush mode
             QTimer.singleShot(200, self.select_brush_mode)
         
+    def restore_drawing_mode(self, mode):
+        """Restore both the visible tool and the pending startup mode."""
+        if mode not in {"brush", "shape", "eraser", "liquify"}:
+            mode = "shape"
+        # Opening a pixel mask must never trigger a lossy outline conversion.
+        if self.has_raster_only_masks():
+            mode = "brush"
+        self.initial_mode = mode
+        self._apply_initial_mode(mode)
+
     def _apply_initial_mode(self, mode):
         """Apply the initial mode with proper button state handling"""
         
@@ -1482,6 +1499,7 @@ class InpaintingMaskEditor(QDialog):
             self.liquify_btn.update()
             self.liquify_btn.repaint()
         else:  # brush
+            self.mask_widget._last_brush_mode = "brush"
             self.select_brush_mode()
             # Force button state update
             self.brush_btn.setChecked(True)
@@ -1533,6 +1551,10 @@ class InpaintingMaskEditor(QDialog):
         
         # Store the previous mode for later checks
         previous_mode = self.drawing_mode
+        if mode in {"shape", "liquify"} and self.has_raster_only_masks():
+            if not self.create_points_from_masks():
+                self.restore_drawing_mode("brush")
+                return
         if mode != previous_mode:
             self._close_pending_brush_navigation_session()
         
@@ -2130,6 +2152,9 @@ class InpaintingMaskEditor(QDialog):
         
         # Update Apply to Current button state
         self.update_apply_button_state()
+        self.create_points_btn.setEnabled(
+            not self.mask_widget.shape_keyframes and bool(np.any(mask > 0))
+        )
 
     def clear_recent_brush_navigation_mask(self):
         self._recent_brush_navigation_mask = None
@@ -2664,9 +2689,44 @@ class InpaintingMaskEditor(QDialog):
 
         return shapes
 
+    def has_raster_only_masks(self):
+        return (not self.mask_widget.shape_keyframes and
+                any(mask is not None and np.any(mask > 0) for mask in self.mask_frames))
+
+    def create_points_from_masks(self):
+        """Explicit, undoable conversion; never used during project restore."""
+        if not self.has_raster_only_masks():
+            return False
+        answer = QMessageBox.question(
+            self, "Create outline points?",
+            "Convert all mask frames to editable outlines?\n\n"
+            "This approximates edges, fills interior holes, and removes grayscale. "
+            "You can undo the conversion to restore the original masks.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return False
+        self._close_pending_brush_navigation_session()
+        state = self.mask_widget._capture_state("Create outline points", full_snapshot=True)
+        state['drawing_mode'] = self.drawing_mode or 'brush'
+        generated = self.bootstrap_shape_keyframes_from_masks()
+        if not generated:
+            QMessageBox.information(self, "No outlines found", "The mask regions are too small to create outlines. The original masks are unchanged.")
+            return False
+        self.mask_widget._push_undo_snapshot(state)
+        self.restore_drawing_mode("shape")
+        self.update_display()
+        return True
+
     def bootstrap_shape_keyframes_from_masks(self, target_vertices=None, frame_indices=None, overwrite_existing=False):
         if not hasattr(self.mask_widget, 'shape_keyframes'):
             self.mask_widget.shape_keyframes = {}
+
+        # A saved vector timeline already defines interpolation and explicit
+        # empty frames. Its raster export must not become extra keyframes.
+        if frame_indices is None and self.mask_widget.shape_keyframes and not overwrite_existing:
+            return 0
+        raster_only = frame_indices is None and not self.mask_widget.shape_keyframes
 
         if target_vertices is None:
             target_vertices = int(self.vertex_count_slider.value()) if hasattr(self, 'vertex_count_slider') else 150
@@ -2678,7 +2738,7 @@ class InpaintingMaskEditor(QDialog):
         for frame_index in frame_indices:
             if frame_index < 0 or frame_index >= len(self.mask_frames):
                 continue
-            if self.mask_widget.shape_keyframes.get(frame_index) and not overwrite_existing:
+            if frame_index in self.mask_widget.shape_keyframes and not overwrite_existing:
                 continue
 
             frame_mask = self.mask_frames[frame_index]
@@ -2695,6 +2755,11 @@ class InpaintingMaskEditor(QDialog):
                 self.mask_widget.shape_keyframes.pop(frame_index, None)
 
         if generated_frames:
+            if raster_only:
+                # Blank raster frames are intentional; prevent extrapolated
+                # shapes from filling them when the sequence is exported.
+                for frame_index in range(len(self.mask_frames)):
+                    self.mask_widget.shape_keyframes.setdefault(frame_index, [])
             self.mask_widget.invalidate_shape_cache()
             self.update_mask_frame_tracking()
 
@@ -3700,20 +3765,11 @@ class InpaintingMaskEditor(QDialog):
             self.vertex_count_slider.blockSignals(False)
             self.apply_vertex_count_setting(loaded_vertex_count, persist_setting=True)
 
-            bootstrapped_keyframes = self.bootstrap_shape_keyframes_from_masks(target_vertices=loaded_vertex_count)
-            if bootstrapped_keyframes > 0:
-                progress_value[0] = max(progress_value[0], 82)
-                progress.setValue(progress_value[0])
-                QApplication.processEvents()
-
             # Force shapes to match loaded vertex count even when slider value is unchanged.
             self.normalize_shape_keyframes_to_target_vertices(loaded_vertex_count)
 
             drawing_mode = project_data.get('drawing_mode', 'brush')
-            if bootstrapped_keyframes > 0 and drawing_mode == 'brush':
-                drawing_mode = 'shape'
-
-            self.set_drawing_mode(drawing_mode)
+            self.restore_drawing_mode(drawing_mode)
             self.brush_size = project_data.get('brush_size', 20)
             self.brush_size_slider.setValue(self.brush_size)
             progress_value[0] = max(progress_value[0], 85)
@@ -4476,6 +4532,8 @@ class MaskDrawingWidget(QWidget):
         self.shape_eraser_mode = False  # Toggle for shape eraser
         self.drag_start_pos = None
         self.original_vertex_pos = None
+        self._vertex_drag_started = False
+        self._vertex_drag_frame = None
         self.temp_shape_mask = None  # Temporary mask for shape painting
         self.shape_merge_mode = False  # Whether to merge with interpolated shapes (Shift+Click)
         self.is_drawing_new_shape = False  # Whether currently drawing new shape (for dimming interpolated shapes)
@@ -4633,6 +4691,7 @@ class MaskDrawingWidget(QWidget):
         # This prevents losing shapes if the user switches modes before moving the brush
         if mode == "liquify":
             logger.info(f"[MaskDrawingWidget.set_drawing_mode] Entering liquify mode - shapes will be captured on first use")
+        self.update()
         
     def set_brush_size(self, size):
         self.brush_size = size
@@ -4868,6 +4927,13 @@ class MaskDrawingWidget(QWidget):
                 # Mark stroke made for temporary brush/eraser
                 self.mark_stroke_made()
                 if self.drawing_mode == "shape":
+                    # Visible points are direct drag targets. Shift retains the
+                    # existing merge-stroke gesture on interpolated frames.
+                    if (self.show_mask_overlay and not self.shape_eraser_mode and
+                            not (event.modifiers() & Qt.ShiftModifier)):
+                        self.check_vertex_selection(event.pos())
+                        if self.selected_vertex_index is not None:
+                            return
                     if self.warp_mode:
                         # Check if clicking on a vertex
                         self.check_vertex_selection(event.pos())
@@ -5055,7 +5121,7 @@ class MaskDrawingWidget(QWidget):
                     self.current_stroke_points.append(img_coords)
                 
                 self.last_point = event.pos()
-        elif self.selected_vertex_index is not None and self.warp_mode:
+        elif self.selected_vertex_index is not None and self.drawing_mode == "shape":
             # Warp the selected vertex
             self.warp_vertex(event.pos())
         elif self.is_liquifying and self.current_tool == "liquify":
@@ -5155,10 +5221,10 @@ class MaskDrawingWidget(QWidget):
                 ):
                     self.parent_editor.clear_recent_brush_navigation_mask()
             elif self.selected_vertex_index is not None:
-                # Save state after warping vertex
-                self.save_undo_state("Warp vertex")
+                # The undo snapshot is captured before the first actual movement.
                 self.selected_vertex_index = None
                 self.selected_shape_index = None
+                self._vertex_drag_started = False
             elif self.is_liquifying:
                 # Save state after liquify stroke
                 self.save_undo_state("Liquify")
@@ -5643,6 +5709,9 @@ class MaskDrawingWidget(QWidget):
     
     def check_vertex_selection(self, pos):
         """Check if clicking on a vertex for warping"""
+        self.selected_shape_index = None
+        self.selected_vertex_index = None
+        self._vertex_drag_started = False
         img_coords = self.widget_to_image_coords(pos)
         if img_coords[0] is None:
             return
@@ -5650,16 +5719,26 @@ class MaskDrawingWidget(QWidget):
         frame = self.parent_editor.current_frame_index if self.parent_editor else 0
         shapes = self.get_shapes_for_frame(frame)
         
-        # Check each shape's vertices
+        # Handles have a fixed screen size, so hit testing must also use screen
+        # pixels. Choose the nearest visible handle when dense vertices overlap.
+        scale_x = self.display_rect.width() / self.mask.shape[1]
+        scale_y = self.display_rect.height() / self.mask.shape[0]
+        nearest_distance = 10.0
         for shape_idx, shape in enumerate(shapes):
+            if not shape.get('visible', True):
+                continue
             for vertex_idx, vertex in enumerate(shape['vertices']):
-                dist = np.linalg.norm(np.array(vertex) - np.array(img_coords))
-                if dist < 10:  # Within 10 pixels
+                vertex_x = self.display_rect.x() + vertex[0] * scale_x
+                vertex_y = self.display_rect.y() + vertex[1] * scale_y
+                dist = np.hypot(vertex_x - pos.x(), vertex_y - pos.y())
+                if dist < nearest_distance:
+                    nearest_distance = dist
+                    self._vertex_drag_frame = frame
                     self.selected_shape_index = shape_idx
                     self.selected_vertex_index = vertex_idx
                     self.drag_start_pos = pos
                     self.original_vertex_pos = vertex.copy()
-                    return
+        self.update()
     
     def warp_vertex(self, pos):
         """Warp the selected vertex"""
@@ -5671,6 +5750,25 @@ class MaskDrawingWidget(QWidget):
             return
             
         frame = self.parent_editor.current_frame_index if self.parent_editor else 0
+
+        shapes = self.get_shapes_for_frame(frame)
+        if (frame != self._vertex_drag_frame or
+                self.selected_shape_index >= len(shapes) or
+                self.selected_vertex_index >= len(shapes[self.selected_shape_index]['vertices'])):
+            self.selected_shape_index = None
+            self.selected_vertex_index = None
+            self._vertex_drag_started = False
+            return
+
+        if not self._vertex_drag_started:
+            if pos == self.drag_start_pos:
+                return
+            self.save_undo_state("Warp vertex", affected_frames=[frame])
+            # Interpolated handles are editable too; preserve the surrounding
+            # keyframes and create a keyframe only when dragging actually begins.
+            if frame not in self.shape_keyframes:
+                self.shape_keyframes[frame] = self.get_shapes_for_frame(frame)
+            self._vertex_drag_started = True
         
         # Update vertex position
         if frame in self.shape_keyframes:
@@ -5681,13 +5779,14 @@ class MaskDrawingWidget(QWidget):
             if self.relax_mode:
                 self.relax_vertex(frame, self.selected_shape_index, self.selected_vertex_index)
             
-            # Clear cache and update
-            # Shapes will be recalculated
+            self.invalidate_shape_cache()
             
             # Don't normalize - it destroys our preserved start points
             # self.normalize_all_shape_keyframes()
             
             self.update_mask_from_shapes()
+            if self.parent_editor:
+                self.parent_editor.update_mask_frame_tracking()
     
     def relax_vertex(self, frame, shape_idx, vertex_idx):
         """Apply relaxation to smooth vertex positions"""
@@ -8184,6 +8283,7 @@ class MaskDrawingWidget(QWidget):
             shortcuts.append(("Alt+Left/Right", "Prev/Next mask"))
 
         if self.drawing_mode == "shape":
+            shortcuts.append(("Drag point", "Move vertex"))
             shortcuts.append(("Ctrl", "Shape eraser (hold)"))
             shortcuts.append(("Shift", "Relax vertices"))
             shortcuts.append(("Shift+Click", "Merge shape (interp)"))
@@ -8962,6 +9062,8 @@ class MaskDrawingWidget(QWidget):
             full_snapshot=bool(state.get('full_snapshot', True)),
             affected_frames=state.get('affected_frames'),
         )
+        if 'drawing_mode' in state:
+            current_state['drawing_mode'] = self.drawing_mode
         
         self.redo_stack.append(current_state)
         
@@ -8982,6 +9084,8 @@ class MaskDrawingWidget(QWidget):
             full_snapshot=bool(state.get('full_snapshot', True)),
             affected_frames=state.get('affected_frames'),
         )
+        if 'drawing_mode' in state:
+            current_state['drawing_mode'] = self.drawing_mode
         self.undo_stack.append(current_state)
         if len(self.undo_stack) > self.max_undo_steps:
             self.undo_stack.pop(0)
@@ -9034,6 +9138,9 @@ class MaskDrawingWidget(QWidget):
         elif state['mask'] is not None:
             self.mask = state['mask'].copy()
         
+        if 'drawing_mode' in state and parent_editor:
+            parent_editor.restore_drawing_mode(state['drawing_mode'])
+
         # Update display
         if self.drawing_mode == "shape":
             self.update_mask_from_shapes()

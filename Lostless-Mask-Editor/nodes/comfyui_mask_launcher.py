@@ -1282,8 +1282,8 @@ class EnhancedMaskEditor(InpaintingMaskEditor):
                     self.mask_widget.shape_keyframes = result["shape_keyframes"]
                     self.mask_widget.invalidate_shape_cache()
                     def complete_shape_loading():
-                        self.mask_widget.update_mask_from_shapes()
                         self.mask_widget.complete_initialization()
+                        self.update_display()
                         if hasattr(self, 'update_mask_frame_tracking'):
                             original_mode = self.drawing_mode
                             self.drawing_mode = 'shape'
@@ -1297,8 +1297,8 @@ class EnhancedMaskEditor(InpaintingMaskEditor):
                             self.mask_frames[frame_num] = mask
 
                 settings = result["settings"]
-                if "drawing_mode" in settings:
-                    self.drawing_mode = settings["drawing_mode"]
+                restored_mode = project_data.get("drawing_mode", settings.get("drawing_mode", self.initial_mode))
+                self.restore_drawing_mode(restored_mode)
                 if "brush_size" in settings:
                     self.brush_size = settings["brush_size"]
                     if hasattr(self, 'brush_size_slider'):
@@ -1361,7 +1361,7 @@ class EnhancedMaskEditor(InpaintingMaskEditor):
                         "height": self.current_frames[0].shape[0] if self.current_frames else 512
                     },
                     "shape_keyframes": {},
-                "mask_frames": {},
+                    "mask_frames": {},
                     "current_frame": self.current_frame_index,
                     "drawing_mode": self.drawing_mode,
                     "current_project_path": self.current_project_path,
@@ -1388,12 +1388,22 @@ class EnhancedMaskEditor(InpaintingMaskEditor):
                     for frame, shapes in self.mask_widget.shape_keyframes.items():
                         session_data["shape_keyframes"][str(frame)] = shapes
                 self.logger.info(f"[Auto-save] Shape copying took {time.time() - shape_copy_start:.2f}s")
+
+                # Pixel masks have no vector keyframes to recover from.
+                for frame, mask in enumerate(self.mask_frames):
+                    if mask is not None and np.any(mask > 0):
+                        ok, encoded = cv2.imencode(".png", mask)
+                        if not ok:
+                            raise RuntimeError(f"Failed to encode mask frame {frame}")
+                        session_data["mask_frames"][str(frame)] = base64.b64encode(encoded).decode("ascii")
                 
                 # Save to temporary auto-save file (NOT the current state)
                 json_save_start = time.time()
+                os.makedirs(self.output_dir, exist_ok=True)
                 autosave_file = os.path.join(self.output_dir, "working_autosave.json")
-                with open(autosave_file, 'w') as f:
+                with open(autosave_file + ".tmp", 'w') as f:
                     json.dump(session_data, f, indent=2)
+                os.replace(autosave_file + ".tmp", autosave_file)
                 self.logger.info(f"[Auto-save] JSON saving to working_autosave.json took {time.time() - json_save_start:.2f}s")
                 
                 total_time = time.time() - start_time
@@ -2241,6 +2251,7 @@ def main():
                 if hasattr(editor, 'mask_widget'):
                     print(f"[ComfyUI Mask Editor] Setting shape_keyframes on mask_widget")
                     editor.mask_widget.shape_keyframes = shape_keyframes
+                    editor.mask_widget.invalidate_shape_cache()
                     editor.mask_widget.update_mask_from_shapes()
                     print(f"[ComfyUI Mask Editor] mask_widget.shape_keyframes now has {len(editor.mask_widget.shape_keyframes)} frames")
                     
@@ -2257,8 +2268,6 @@ def main():
                     # Timeline will be updated later after all data is loaded
                 else:
                     print(f"[ComfyUI Mask Editor] ERROR: editor.mask_widget not found!")
-
-            bootstrapped_keyframes = 0
 
             # Restore raster mask frames (Comfy-driven path)
             if "mask_frames" in project:
@@ -2299,35 +2308,17 @@ def main():
                             editor.drawing_mode = 'brush'
                             editor.update_mask_frame_tracking()
                             editor.drawing_mode = original_mode
-                    if (
-                        restored_masks > 0 and
-                        hasattr(editor, 'bootstrap_shape_keyframes_from_masks') and
-                        hasattr(editor, 'mask_widget')
-                    ):
-                        preferred_vertex_count = int(project_settings.get("vertex_count", 150))
-                        bootstrapped_keyframes = editor.bootstrap_shape_keyframes_from_masks(
-                            target_vertices=preferred_vertex_count
-                        )
-                        if bootstrapped_keyframes > 0:
-                            print(
-                                f"[ComfyUI Mask Editor] Bootstrapped {bootstrapped_keyframes} "
-                                "shape keyframe(s) from restored raster masks"
-                            )
                     print(f"[ComfyUI Mask Editor] Restored raster masks: restored={restored_masks}, skipped={skipped_masks}, frame_buffer={len(editor.mask_frames) if hasattr(editor, 'mask_frames') else 'n/a'}")
                 except Exception as mask_restore_error:
                     print(f"[ComfyUI Mask Editor] Failed restoring raster masks: {mask_restore_error}")
             
             # Restore other session data
             if "current_frame" in project:
-                editor.current_frame_index = project["current_frame"]
                 if hasattr(editor, 'on_frame_changed'):
-                    editor.on_frame_changed(editor.current_frame_index)
+                    saved_frame = max(0, min(int(project["current_frame"]), len(editor.video_frames) - 1))
+                    editor.on_frame_changed(saved_frame)
 
             if project_settings:
-                if bootstrapped_keyframes > 0 and project_settings.get("drawing_mode", "brush") == "brush":
-                    project_settings = dict(project_settings)
-                    project_settings["drawing_mode"] = "shape"
-
                 settings_mode = project_settings.get("drawing_mode")
                 if settings_mode and hasattr(editor, 'initial_mode'):
                     editor.initial_mode = settings_mode
@@ -2346,16 +2337,12 @@ def main():
                     editor.vertex_count_slider.blockSignals(False)
                     if hasattr(editor, 'apply_vertex_count_setting'):
                         editor.apply_vertex_count_setting(vertex_count, persist_setting=False)
-            elif bootstrapped_keyframes > 0 and hasattr(editor, 'initial_mode'):
-                editor.initial_mode = "shape"
-                if hasattr(editor, 'mask_widget'):
-                    editor.mask_widget._last_brush_mode = "shape"
                     
             if "drawing_mode" in project and hasattr(editor, 'set_drawing_mode'):
                 drawing_mode = project["drawing_mode"]
-                if bootstrapped_keyframes > 0 and drawing_mode == "brush":
-                    drawing_mode = "shape"
-                editor.set_drawing_mode(drawing_mode)
+                editor.initial_mode = drawing_mode
+
+            editor.restore_drawing_mode(editor.initial_mode)
                 
             if "current_project_path" in project:
                 editor.current_project_path = project["current_project_path"]
@@ -2578,7 +2565,6 @@ if __name__ == "__main__":
         sys.stderr.flush()
         sys.stdout.flush()
         sys.exit(1)
-
 
 
 
